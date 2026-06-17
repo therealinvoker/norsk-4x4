@@ -8,11 +8,13 @@ android {
     compileSdk 33
 
     defaultConfig {
-        applicationId "com.spop.poverlay"
+        // Distinct from grupetto's id so both can be installed side by side. The code namespace
+        // stays com.spop.poverlay; only the install identity changes.
+        applicationId "com.trudys.norsk4x4"
         minSdk 21
         targetSdk 33
-        versionCode 2
-        versionName "v0.2"
+        versionCode 1
+        versionName "1.0-norsk4x4"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -84,6 +86,7 @@ dependencies {
     implementation "androidx.savedstate:savedstate:1.2.0"
     implementation "androidx.savedstate:savedstate-ktx:1.2.0"
     implementation 'com.jakewharton.timber:timber:5.0.1'
+    implementation 'com.google.code.gson:gson:2.10.1'
     implementation "com.squareup.okhttp3:okhttp:4.10.0"
     implementation "ru.gildor.coroutines:kotlin-coroutines-okhttp:1.0"
     implementation 'com.github.Pfuster12:LiveChart:1.3.5'

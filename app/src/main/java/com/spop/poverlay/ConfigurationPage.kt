@@ -3,7 +3,9 @@ package com.spop.poverlay
 import android.os.Build
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spop.poverlay.fourbyfour.ui.FourByFourControls
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.ui.theme.ErrorColor
 import com.spop.poverlay.ui.theme.LatoFontFamily
@@ -27,15 +30,19 @@ import com.spop.poverlay.ui.theme.LatoFontFamily
 
 @Composable
 fun ConfigurationPage(
-    viewModel: ConfigurationViewModel
+    viewModel: ConfigurationViewModel,
+    onOpenHistory: () -> Unit = {},
 ) {
     val showPermissionInfo by remember { viewModel.showPermissionInfo }
     val latestRelease by remember { viewModel.latestRelease }
 
     Column(
-        Modifier.fillMaxSize(),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
         if (showPermissionInfo) {
             PermissionPage(viewModel::onGrantPermissionClicked)
@@ -48,6 +55,8 @@ fun ConfigurationPage(
                 timerShownWhenMinimized,
                 viewModel::onShowTimerWhenMinimizedClicked,
                 viewModel::onStartServiceClicked,
+                viewModel::onStartFourByFourClicked,
+                onOpenHistory,
                 viewModel::onRestartClicked,
                 viewModel::onClickedRelease,
                 latestRelease
@@ -61,22 +70,29 @@ private fun StartServicePage(
     timerShownWhenMinimized: Boolean,
     onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
     onClickedStartOverlay: () -> Unit,
+    onClickedStartFourByFour: () -> Unit,
+    onOpenHistory: () -> Unit,
     onClickedRestartApp: () -> Unit,
     onClickedRelease: (Release) -> Unit,
     latestRelease: Release?
 ) {
     Text(
-        text = "Grupetto: An overlay for your Peloton bike",
+        text = "Norsk 4×4",
         fontSize = 50.sp,
         fontWeight = FontWeight.Bold
     )
     Text(
+        text = "Norwegian 4×4 interval training for your Peloton bike",
+        fontSize = 22.sp,
+        fontStyle = FontStyle.Italic,
+    )
+    Text(
         text = "Note: Not endorsed with, associated with, or supported by Peloton",
-        fontSize = 25.sp,
+        fontSize = 16.sp,
         fontStyle = FontStyle.Italic,
         fontWeight = FontWeight.Bold
     )
-    Spacer(modifier = Modifier.height(180.dp))
+    Spacer(modifier = Modifier.height(40.dp))
     Button(
         onClick = onClickedStartOverlay,
     ) {
@@ -99,6 +115,12 @@ private fun StartServicePage(
             onCheckedChange = onTimerShownWhenMinimizedToggled
         )
     }
+
+    Spacer(modifier = Modifier.height(32.dp))
+    FourByFourControls(
+        onStart = onClickedStartFourByFour,
+        onOpenHistory = onOpenHistory,
+    )
 
     Spacer(modifier = Modifier.height(40.dp))
 

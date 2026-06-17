@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spop.poverlay.R
+import com.spop.poverlay.fourbyfour.FourByFourState
 import com.spop.poverlay.overlay.BackgroundColorDefault
 import com.spop.poverlay.overlay.OverlayLocation
 
@@ -39,6 +40,7 @@ fun OverlayMinimizedContent(
     contentAlpha: Float,
     timerLabel: String,
     timerPaused: Boolean,
+    fourByFourState: FourByFourState?,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onLayout: (IntSize) -> Unit
@@ -114,6 +116,10 @@ fun OverlayMinimizedContent(
         }
 
         if (isMinimized) {
+            if (fourByFourState != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                FourByFourMinimizedField(state = fourByFourState)
+            }
             Spacer(modifier = Modifier.width(4.dp))
             OverlayTimerField(
                 modifier = Modifier.width(58.dp),

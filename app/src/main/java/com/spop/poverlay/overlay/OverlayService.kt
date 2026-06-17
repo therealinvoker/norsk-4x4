@@ -8,6 +8,9 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -24,9 +27,13 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
+import com.spop.poverlay.fourbyfour.FourByFour
+import com.spop.poverlay.fourbyfour.PhaseType
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
@@ -124,6 +131,24 @@ class OverlayService : LifecycleEnabledService() {
             ConfigurationRepository(applicationContext, this)
         )
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
+
+        // Feed live telemetry into the active 4x4 recorder (samples are deduped to ~1 Hz).
+        lifecycleScope.launch(Dispatchers.IO) {
+            combine(
+                sensorInterface.power,
+                sensorInterface.cadence,
+                sensorInterface.resistance
+            ) { power, cadence, resistance -> Triple(power, cadence, resistance) }
+                .collect { (power, cadence, resistance) ->
+                    FourByFour.recordSample(power, cadence, resistance)
+                }
+        }
+        // Fire a vibration cue whenever the session crosses into a new phase.
+        lifecycleScope.launch {
+            FourByFour.transitions.collect { transition ->
+                if (FourByFour.cuesEnabled.value) vibrateForTransition(transition.to)
+            }
+        }
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -230,6 +255,26 @@ class OverlayService : LifecycleEnabledService() {
                 wm.updateViewLayout(overlayView, overlayParams)
                 wm.updateViewLayout(touchTargetView, touchTargetParams)
             }.collect {}
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun vibrateForTransition(to: PhaseType) {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+        val pattern = when (to) {
+            // Ramp of buzzes going into a hard interval, single buzz easing into recovery.
+            PhaseType.Work -> longArrayOf(0, 250, 120, 250, 120, 400)
+            PhaseType.Recovery, PhaseType.CoolDown, PhaseType.WarmUp -> longArrayOf(0, 300)
+            PhaseType.Finished -> longArrayOf(0, 200, 100, 200, 100, 600)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+        } else {
+            vibrator.vibrate(pattern, -1)
         }
     }
 

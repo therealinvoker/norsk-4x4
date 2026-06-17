@@ -1,5 +1,6 @@
 package com.spop.poverlay
 
+import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.util.IsRunningOnPeloton
 import timber.log.Timber
 import timber.log.Timber.*
@@ -10,5 +11,6 @@ class GrupettoApplication : android.app.Application() {
         if(BuildConfig.DEBUG || IsRunningOnPeloton){
             Timber.plant(DebugTree())
         }
+        FourByFour.init(this)
     }
 }

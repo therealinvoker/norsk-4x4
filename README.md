@@ -15,11 +15,78 @@ You can use it to watch media from sources like Netflix and Youtube while viewin
 ***Note: This project is wholly unaffiliated with Peloton. Please do not approach them for support
 with this app. It relies on undocumented interfaces that are subject to change with any update.***
 
+---
+
+# Norsk 4×4 (this fork)
+
+This is a fork of [grupetto](https://github.com/selalipop/grupetto) that turns the live overlay into
+a coach for the **Norwegian 4×4** interval protocol
+([NTNU/CERG](https://www.ntnu.edu/cerg/advice)): a warm-up, then repeats of a hard work interval and
+an active recovery, then a cool-down.
+
+Because the Bike+ exposes **power (watts)** but not heart rate, intensity is driven and measured by
+power. The data model keeps an `hr` field reserved so a future Bluetooth HR strap can be added
+without a migration.
+
+> It installs under its own application id (`com.trudys.norsk4x4`), so it **coexists** with the
+> original grupetto app — both can be on the bike at once.
+
+## What this fork adds
+
+- **4×4 interval engine** — a pure-Kotlin state machine (`fourbyfour/`) that derives the current
+  phase, countdown, and progress purely from elapsed time. Configurable warm-up / work / recovery /
+  cool-down durations and interval count, with optional **power targets** for effort color-coding.
+- **Live 4×4 banner**, integrated onto the **same surface** as the power/cadence/resistance/speed
+  stats (one panel, not a second floating window). Shows the phase, a big countdown, the next phase,
+  and a progress bar.
+- **Best-interval pacing line** — during each work interval the banner plots your **live output**
+  against a dashed reference line at your **best-ever interval average** (with a green/amber/red
+  running interval average). Falls back to a cumulative **kJ vs. best** chip outside work intervals.
+- **Minimized strip** keeps a compact 4×4 field (phase + countdown) inline with the stats, so the
+  interval info never disappears when you tap away.
+- **Workout history** — every session is saved as JSON on the device (`history/`); a history screen
+  lists rides and a detail screen shows stats plus a power-over-time chart with the work intervals
+  shaded and your best ride drawn as a ghost line.
+- **Haptic cues** on phase changes (toggleable), and a **vibrate-on-phase-change** setting.
+- Banner gestures: **tap to pause/resume**, **long-press to stop** the session.
+
+## Building & installing
+
+The app builds with **JDK 17** and the Android SDK (compileSdk 33). With a local command-line SDK:
+
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)   # or your JDK 17 path
+./gradlew :app:assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+Sideload onto the bike over ADB (see the upstream sideloading guide below):
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell monkey -p com.trudys.norsk4x4 -c android.intent.category.LAUNCHER 1
+```
+
+A GitHub Actions workflow (`.github/workflows/build-apk.yml`) also builds the debug APK and uploads
+it as an artifact on pushes to the feature branch / `develop` and on manual dispatch.
+
+## Using it
+
+Open **Norsk 4×4**, set your durations / intervals / (optional) power targets on the config screen,
+then tap **Start 4×4 ride**. The overlay coaches you through the protocol; pull up **Workout
+history** any time to review past sessions and compare against your best.
+
+---
+
 For developers: When forking this project, be sure to update
 the [ReleaseChecker](app/src/main/java/com/spop/poverlay/releases/ReleaseChecker.kt) to point to
 your repository
 
 ---
+
+## Upstream grupetto documentation
+
+The sections below are the original grupetto docs, retained for reference.
 
 - [Installation](#installation)
 - [Usage](#usage)

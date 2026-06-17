@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spop.poverlay.fourbyfour.FourByFour
+import com.spop.poverlay.overlay.composables.FourByFourBanner
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import kotlinx.coroutines.flow.drop
@@ -63,6 +65,14 @@ fun Overlay(
     val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
+
+    val fourByFourState by FourByFour.state.collectAsStateWithLifecycle()
+    val fourByFourConfig by FourByFour.config.collectAsStateWithLifecycle()
+    val vsBestKj by FourByFour.liveVsBestKj.collectAsStateWithLifecycle()
+    val bestIntervalAvgWatts by FourByFour.bestIntervalAvgWatts.collectAsStateWithLifecycle()
+    val currentIntervalAvgWatts by FourByFour.currentIntervalAvgWatts.collectAsStateWithLifecycle()
+    val intervalTrace by FourByFour.currentIntervalTrace.collectAsStateWithLifecycle()
+    val currentPowerRaw by sensorViewModel.powerRaw.collectAsStateWithLifecycle(initialValue = 0f)
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
@@ -137,14 +147,18 @@ fun Overlay(
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            fourByFourState = fourByFourState.takeIf { it.active || it.finished },
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onLayout = onTimerLayout
         )
     }
-    val mainContent = @Composable {
+    // Stats + the 4x4 banner share one rounded surface so they read as a single panel rather than
+    // two stacked windows. The banner is only part of the panel while expanded; minimized state
+    // surfaces the compact 4x4 field inside the timer strip instead.
+    val showBanner = (fourByFourState.active || fourByFourState.finished) && !minimized
+    val statsPanel = @Composable {
         Box(modifier = Modifier
-            .requiredHeight(height)
             .wrapContentWidth(unbounded = true)
             .onSizeChanged {
                 if (it.width != size.value.width || it.height != size.value.height) {
@@ -173,28 +187,63 @@ fun Overlay(
                     onLongPress = { sensorViewModel.onOverlayDoubleTap() })
             }) {
 
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val statsRow = @Composable {
+                    Box(
+                        modifier = Modifier
+                            .requiredHeight(height)
+                            .wrapContentWidth(unbounded = true)
+                    ) {
+                        val rowAlignment = when (location) {
+                            OverlayLocation.Top -> Alignment.Top
+                            OverlayLocation.Bottom -> Alignment.Bottom
+                        }
 
-            val rowAlignment = when (location) {
-                OverlayLocation.Top -> Alignment.Top
-                OverlayLocation.Bottom -> Alignment.Bottom
+                        OverlayMainContent(
+                            modifier = Modifier
+                                .wrapContentWidth(unbounded = true)
+                                .padding(horizontal = 9.dp)
+                                .padding(bottom = 5.dp),
+                            rowAlignment = rowAlignment,
+                            power = power,
+                            rpm = rpm,
+                            pauseChart = isCurrentlyAnimating,
+                            powerGraph = powerGraph,
+                            resistance = resistance,
+                            speed = speed,
+                            speedLabel = speedLabel,
+                            onSpeedClicked = { sensorViewModel.onClickedSpeed() },
+                            onChartClicked = { sensorViewModel.onOverlayPressed() }
+                        )
+                    }
+                }
+                val bannerRow = @Composable {
+                    FourByFourBanner(
+                        state = fourByFourState,
+                        config = fourByFourConfig,
+                        currentPower = currentPowerRaw,
+                        vsBestKj = vsBestKj,
+                        bestIntervalAvgWatts = bestIntervalAvgWatts,
+                        currentIntervalAvgWatts = currentIntervalAvgWatts,
+                        intervalTrace = intervalTrace,
+                        onTap = { FourByFour.togglePause() },
+                        onLongPress = { FourByFour.stop() },
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .padding(bottom = 8.dp),
+                    )
+                }
+                when (location) {
+                    OverlayLocation.Top -> {
+                        statsRow()
+                        if (showBanner) bannerRow()
+                    }
+                    OverlayLocation.Bottom -> {
+                        if (showBanner) bannerRow()
+                        statsRow()
+                    }
+                }
             }
-
-            OverlayMainContent(
-                modifier = Modifier
-                    .wrapContentWidth(unbounded = true)
-                    .padding(horizontal = 9.dp)
-                    .padding(bottom = 5.dp),
-                rowAlignment = rowAlignment,
-                power = power,
-                rpm = rpm,
-                pauseChart = isCurrentlyAnimating,
-                powerGraph = powerGraph,
-                resistance = resistance,
-                speed = speed,
-                speedLabel = speedLabel,
-                onSpeedClicked = { sensorViewModel.onClickedSpeed() },
-                onChartClicked = { sensorViewModel.onOverlayPressed() }
-            )
         }
     }
 
@@ -228,14 +277,12 @@ fun Overlay(
 
             when (location) {
                 OverlayLocation.Top -> {
-                    mainContent()
-
+                    statsPanel()
                     timer()
                 }
                 OverlayLocation.Bottom -> {
                     timer()
-                    mainContent()
-
+                    statsPanel()
                 }
             }
         }

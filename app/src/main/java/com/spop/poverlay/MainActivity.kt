@@ -16,10 +16,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
+import com.spop.poverlay.history.ui.HistoryScreen
+import com.spop.poverlay.history.ui.SessionDetailScreen
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +33,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+
+private enum class Screen { Home, History, Detail }
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: ConfigurationViewModel
@@ -60,9 +68,22 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    ConfigurationPage(
-                        viewModel
-                    )
+                    var screen by rememberSaveable { mutableStateOf(Screen.Home.name) }
+                    var detailId by rememberSaveable { mutableStateOf<String?>(null) }
+                    when (Screen.valueOf(screen)) {
+                        Screen.Home -> ConfigurationPage(
+                            viewModel,
+                            onOpenHistory = { screen = Screen.History.name },
+                        )
+                        Screen.History -> HistoryScreen(
+                            onBack = { screen = Screen.Home.name },
+                            onOpenSession = { id -> detailId = id; screen = Screen.Detail.name },
+                        )
+                        Screen.Detail -> SessionDetailScreen(
+                            sessionId = detailId,
+                            onBack = { screen = Screen.History.name },
+                        )
+                    }
                 }
             }
         }
