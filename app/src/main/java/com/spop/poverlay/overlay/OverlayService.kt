@@ -34,6 +34,7 @@ import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.fourbyfour.PhaseType
+import com.spop.poverlay.hr.HeartRateManager
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
@@ -47,6 +48,9 @@ import timber.log.Timber
 import java.util.*
 import kotlin.math.roundToInt
 
+
+/** Bundles the four telemetry streams fed into the recorder so they can be combined as one flow. */
+private data class Sample(val power: Float, val cadence: Float, val resistance: Float, val hr: Int?)
 
 class OverlayService : LifecycleEnabledService() {
     companion object {
@@ -132,15 +136,18 @@ class OverlayService : LifecycleEnabledService() {
         )
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
 
-        // Feed live telemetry into the active 4x4 recorder (samples are deduped to ~1 Hz).
+        // Feed live telemetry into the active 4x4 recorder (samples are deduped to ~1 Hz). The HR
+        // flow is a StateFlow seeded with null, so combine proceeds immediately even before (or
+        // without) a connected strap.
         lifecycleScope.launch(Dispatchers.IO) {
             combine(
                 sensorInterface.power,
                 sensorInterface.cadence,
-                sensorInterface.resistance
-            ) { power, cadence, resistance -> Triple(power, cadence, resistance) }
-                .collect { (power, cadence, resistance) ->
-                    FourByFour.recordSample(power, cadence, resistance)
+                sensorInterface.resistance,
+                HeartRateManager.bpm,
+            ) { power, cadence, resistance, hr -> Sample(power, cadence, resistance, hr) }
+                .collect { (power, cadence, resistance, hr) ->
+                    FourByFour.recordSample(power, cadence, resistance, hr)
                 }
         }
         // Fire a vibration cue whenever the session crosses into a new phase.

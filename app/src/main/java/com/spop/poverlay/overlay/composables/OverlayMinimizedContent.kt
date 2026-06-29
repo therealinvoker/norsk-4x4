@@ -41,6 +41,7 @@ fun OverlayMinimizedContent(
     timerLabel: String,
     timerPaused: Boolean,
     fourByFourState: FourByFourState?,
+    heartRate: Int?,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onLayout: (IntSize) -> Unit
@@ -144,6 +145,14 @@ fun OverlayMinimizedContent(
                 timerLabel = resistanceLabel,
                 iconDrawable = R.drawable.ic_resistance
             )
+            if (heartRate != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = heartRate.toString(),
+                    iconDrawable = R.drawable.ic_heart
+                )
+            }
         }
     }
 }

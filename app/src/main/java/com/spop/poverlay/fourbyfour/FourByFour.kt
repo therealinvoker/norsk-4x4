@@ -6,14 +6,17 @@ import androidx.core.content.edit
 import com.spop.poverlay.history.SessionRecorder
 import com.spop.poverlay.history.WorkoutRepository
 import com.spop.poverlay.history.WorkoutSession
+import com.spop.poverlay.util.tickerFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Process-wide controller for the active 4x4 session and its settings.
@@ -67,6 +70,12 @@ object FourByFour {
     private var currentIntervalIndex = -1
     private val intervalPowers = ArrayList<Float>()
 
+    // Wall-clock of the last moment the rider was actively pedaling (running, not paused). The
+    // watchdog auto-stops the session if this goes stale, covering both "no pedaling" and "paused".
+    @Volatile
+    private var lastActiveMomentMs = 0L
+    private var watchdogJob: Job? = null
+
     @Synchronized
     fun init(context: Context) {
         if (initialized) return
@@ -92,6 +101,30 @@ object FourByFour {
         resetIntervalTracking()
         recorder = SessionRecorder(mutableConfig.value)
         engine.start(mutableConfig.value)
+        startWatchdog()
+    }
+
+    /**
+     * Auto-stop (and save) the ride if the rider is idle or paused for [AUTO_STOP_TIMEOUT_MS]. Any
+     * previously running watchdog is cancelled first so a restart never leaves two watchdogs racing.
+     */
+    private fun startWatchdog() {
+        watchdogJob?.cancel()
+        lastActiveMomentMs = System.currentTimeMillis()
+        watchdogJob = scope.launch {
+            tickerFlow(period = 30.seconds).collect {
+                if (shouldAutoStop(
+                        active = state.value.active,
+                        lastActiveMomentMs = lastActiveMomentMs,
+                        nowMs = System.currentTimeMillis(),
+                        timeoutMs = AUTO_STOP_TIMEOUT_MS,
+                    )
+                ) {
+                    stop()
+                    return@collect
+                }
+            }
+        }
     }
 
     private fun resetIntervalTracking() {
@@ -108,12 +141,19 @@ object FourByFour {
 
     /** Abandon the current session, saving whatever was ridden if it has any work data. */
     fun stop() {
+        watchdogJob?.cancel()
+        watchdogJob = null
         if (state.value.active) finalize(completed = false)
         engine.stop()
     }
 
     fun recordSample(power: Float, cadence: Float, resistance: Float, hr: Int? = null) {
         val state = engine.state.value
+        // Treat any real pedaling in a running (non-paused) session as activity; idle or paused
+        // time is never counted, so both feed the inactivity watchdog.
+        if (state.active && !state.paused && (power > 1f || cadence > 1f)) {
+            lastActiveMomentMs = System.currentTimeMillis()
+        }
         val recorded = recorder?.record(state, power, cadence, resistance, hr) ?: false
         if (recorded) {
             liveJoules += power.coerceAtLeast(0f)
@@ -194,6 +234,8 @@ object FourByFour {
         mutableCuesEnabled.value = prefs.getBoolean(KEY_CUES, true)
     }
 
+    private const val AUTO_STOP_TIMEOUT_MS = 15 * 60 * 1000L
+
     private const val PREFS = "fourbyfour"
     private const val KEY_WARMUP = "warmupSec"
     private const val KEY_WORK = "workSec"
@@ -204,3 +246,10 @@ object FourByFour {
     private const val KEY_EASY_WATTS = "easyTargetWatts"
     private const val KEY_CUES = "cuesEnabled"
 }
+
+/**
+ * Whether an active session should be auto-stopped: true only when the session is [active] and the
+ * rider has been idle (or paused) for at least [timeoutMs]. Pure helper so the rule is unit-testable.
+ */
+fun shouldAutoStop(active: Boolean, lastActiveMomentMs: Long, nowMs: Long, timeoutMs: Long): Boolean =
+    active && (nowMs - lastActiveMomentMs) >= timeoutMs

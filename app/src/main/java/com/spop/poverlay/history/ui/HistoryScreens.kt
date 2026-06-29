@@ -178,16 +178,18 @@ fun SessionDetailScreen(
 @Composable
 private fun StatGrid(session: WorkoutSession) {
     val s = session.summary
-    val stats = listOf(
-        "Work output" to "${"%.0f".format(s.workOutputKj)} kJ",
-        "Total output" to "${"%.0f".format(s.totalOutputKj)} kJ",
-        "Avg interval power" to "${s.avgWorkPower.toInt()} w",
-        "Max power" to "${s.maxPower.toInt()} w",
-        "Avg power" to "${s.avgPower.toInt()} w",
-        "Avg cadence" to "${s.avgCadence.toInt()} rpm",
-        "Avg resistance" to "${s.avgResistance.toInt()}",
-        "Completed" to if (session.completed) "Yes" else "No",
-    )
+    val stats = buildList {
+        add("Work output" to "${"%.0f".format(s.workOutputKj)} kJ")
+        add("Total output" to "${"%.0f".format(s.totalOutputKj)} kJ")
+        add("Avg interval power" to "${s.avgWorkPower.toInt()} w")
+        add("Max power" to "${s.maxPower.toInt()} w")
+        add("Avg power" to "${s.avgPower.toInt()} w")
+        add("Avg cadence" to "${s.avgCadence.toInt()} rpm")
+        add("Avg resistance" to "${s.avgResistance.toInt()}")
+        s.avgHr?.let { add("Avg HR" to "$it bpm") }
+        s.maxHr?.let { add("Max HR" to "$it bpm") }
+        add("Completed" to if (session.completed) "Yes" else "No")
+    }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         stats.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

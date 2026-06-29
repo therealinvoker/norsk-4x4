@@ -1,0 +1,140 @@
+package com.spop.poverlay.hr.ui
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spop.poverlay.hr.HrConnectionState
+import com.spop.poverlay.hr.HeartRateManager
+
+/**
+ * Heart-rate-monitor card for the config screen. Reads the shared [HeartRateManager] flows and
+ * drives its scan/connect/forget API directly, mirroring
+ * [com.spop.poverlay.fourbyfour.ui.FourByFourControls].
+ *
+ * @param onRequestPermissions invoked when the user asks to connect a strap; the host activity is
+ * responsible for granting Bluetooth permissions and then calling [HeartRateManager.startScan].
+ */
+@Composable
+fun HeartRateControls(onRequestPermissions: () -> Unit) {
+    val connectionState by HeartRateManager.connectionState.collectAsStateWithLifecycle()
+    val bpm by HeartRateManager.bpm.collectAsStateWithLifecycle()
+    val deviceName by HeartRateManager.deviceName.collectAsStateWithLifecycle()
+    val discovered by HeartRateManager.discovered.collectAsStateWithLifecycle()
+
+    Card(
+        modifier = Modifier
+            .widthIn(max = 720.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Text("Heart-rate monitor", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(
+                statusLine(connectionState, bpm),
+                fontSize = 16.sp,
+                color = Color.Gray,
+            )
+            deviceName?.let {
+                Text("Strap: $it", fontSize = 14.sp, color = Color.Gray)
+            }
+
+            Spacer(Modifier.height(16.dp))
+            when (connectionState) {
+                HrConnectionState.Connected -> {
+                    OutlinedButton(
+                        onClick = { HeartRateManager.forget() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Forget device") }
+                }
+
+                HrConnectionState.Scanning, HrConnectionState.Connecting -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            if (connectionState == HrConnectionState.Scanning) {
+                                "Searching for straps…"
+                            } else {
+                                "Connecting…"
+                            },
+                        )
+                    }
+                }
+
+                HrConnectionState.Disconnected -> {
+                    Button(
+                        onClick = onRequestPermissions,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9182B)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Connect heart-rate strap", color = Color.White) }
+                }
+            }
+        }
+    }
+
+    if (connectionState == HrConnectionState.Scanning) {
+        AlertDialog(
+            onDismissRequest = { HeartRateManager.stopScan() },
+            title = { Text("Select a heart-rate strap") },
+            text = {
+                if (discovered.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Searching…")
+                    }
+                } else {
+                    Column {
+                        discovered.forEach { device ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { HeartRateManager.connect(device.address) }
+                                    .padding(vertical = 10.dp),
+                            ) {
+                                Text(device.name, fontWeight = FontWeight.SemiBold)
+                                Text(device.address, fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { HeartRateManager.stopScan() }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+private fun statusLine(state: HrConnectionState, bpm: Int?): String = when (state) {
+    HrConnectionState.Connected -> bpm?.let { "Connected · $it bpm" } ?: "Connected"
+    HrConnectionState.Connecting -> "Connecting…"
+    HrConnectionState.Scanning -> "Scanning…"
+    HrConnectionState.Disconnected -> "Not connected"
+}

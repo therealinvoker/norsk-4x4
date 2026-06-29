@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.fourbyfour.FourByFour
+import com.spop.poverlay.hr.HeartRateManager
 import com.spop.poverlay.overlay.composables.FourByFourBanner
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
@@ -73,6 +74,7 @@ fun Overlay(
     val currentIntervalAvgWatts by FourByFour.currentIntervalAvgWatts.collectAsStateWithLifecycle()
     val intervalTrace by FourByFour.currentIntervalTrace.collectAsStateWithLifecycle()
     val currentPowerRaw by sensorViewModel.powerRaw.collectAsStateWithLifecycle(initialValue = 0f)
+    val currentHr by HeartRateManager.bpm.collectAsStateWithLifecycle()
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
@@ -148,6 +150,7 @@ fun Overlay(
             speedLabel = speed,
             resistanceLabel = resistance,
             fourByFourState = fourByFourState.takeIf { it.active || it.finished },
+            heartRate = currentHr,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onLayout = onTimerLayout
@@ -222,12 +225,14 @@ fun Overlay(
                         state = fourByFourState,
                         config = fourByFourConfig,
                         currentPower = currentPowerRaw,
+                        currentHr = currentHr,
                         vsBestKj = vsBestKj,
                         bestIntervalAvgWatts = bestIntervalAvgWatts,
                         currentIntervalAvgWatts = currentIntervalAvgWatts,
                         intervalTrace = intervalTrace,
                         onTap = { FourByFour.togglePause() },
                         onLongPress = { FourByFour.stop() },
+                        onStop = { FourByFour.stop() },
                         modifier = Modifier
                             .padding(horizontal = 6.dp)
                             .padding(bottom = 8.dp),

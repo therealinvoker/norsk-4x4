@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,12 +70,14 @@ fun FourByFourBanner(
     state: FourByFourState,
     config: ProtocolConfig,
     currentPower: Float,
+    currentHr: Int?,
     vsBestKj: Float?,
     bestIntervalAvgWatts: Float?,
     currentIntervalAvgWatts: Float?,
     intervalTrace: List<Float>,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val accent = state.phase.accent()
@@ -103,6 +106,9 @@ fun FourByFourBanner(
                         fontWeight = FontWeight.Normal,
                     )
                 }
+                if (currentHr != null) {
+                    HeartRateChip(currentHr)
+                }
             }
 
             Spacer(Modifier.width(16.dp))
@@ -121,6 +127,12 @@ fun FourByFourBanner(
                 config = config,
                 currentPower = currentPower,
             )
+
+            Spacer(Modifier.width(12.dp))
+
+            // Its own clickable region wins for its bounds, so the tap reaches onStop instead of
+            // the banner-level tap=pause handler.
+            StopButton(onStop = onStop)
         }
 
         Spacer(Modifier.height(6.dp))
@@ -138,6 +150,39 @@ fun FourByFourBanner(
             Spacer(Modifier.height(4.dp))
         }
         ProgressBar(progress = state.overallProgress, accent = accent)
+    }
+}
+
+private val HeartColor = Color(0xFFD9182B)
+
+/** Small live heart-rate readout shown in the banner only when a strap is connected. */
+@Composable
+private fun HeartRateChip(bpm: Int) {
+    Text(
+        text = "♥ $bpm",
+        color = HeartColor,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+    )
+}
+
+/** Compact red Stop control with its own tap handler so it isn't swallowed by the banner gesture. */
+@Composable
+private fun StopButton(onStop: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(WorkColor)
+            .clickable { onStop() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "■ STOP",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Black,
+        )
     }
 }
 

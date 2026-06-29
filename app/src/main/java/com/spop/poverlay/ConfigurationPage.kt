@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.fourbyfour.ui.FourByFourControls
+import com.spop.poverlay.hr.ui.HeartRateControls
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.ui.theme.ErrorColor
 import com.spop.poverlay.ui.theme.LatoFontFamily
@@ -32,6 +33,7 @@ import com.spop.poverlay.ui.theme.LatoFontFamily
 fun ConfigurationPage(
     viewModel: ConfigurationViewModel,
     onOpenHistory: () -> Unit = {},
+    onConnectHrm: () -> Unit = {},
 ) {
     val showPermissionInfo by remember { viewModel.showPermissionInfo }
     val latestRelease by remember { viewModel.latestRelease }
@@ -57,6 +59,7 @@ fun ConfigurationPage(
                 viewModel::onStartServiceClicked,
                 viewModel::onStartFourByFourClicked,
                 onOpenHistory,
+                onConnectHrm,
                 viewModel::onRestartClicked,
                 viewModel::onClickedRelease,
                 latestRelease
@@ -72,6 +75,7 @@ private fun StartServicePage(
     onClickedStartOverlay: () -> Unit,
     onClickedStartFourByFour: () -> Unit,
     onOpenHistory: () -> Unit,
+    onConnectHrm: () -> Unit,
     onClickedRestartApp: () -> Unit,
     onClickedRelease: (Release) -> Unit,
     latestRelease: Release?
@@ -121,6 +125,9 @@ private fun StartServicePage(
         onStart = onClickedStartFourByFour,
         onOpenHistory = onOpenHistory,
     )
+
+    Spacer(modifier = Modifier.height(16.dp))
+    HeartRateControls(onRequestPermissions = onConnectHrm)
 
     Spacer(modifier = Modifier.height(40.dp))
 
