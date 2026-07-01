@@ -1,5 +1,7 @@
 package com.spop.poverlay.fourbyfour
 
+import kotlin.math.roundToInt
+
 /**
  * The phases of a Norwegian 4x4 interval session.
  *
@@ -51,10 +53,20 @@ data class ProtocolConfig(
     val intervals: Int = DEFAULT_INTERVALS,
     val hardTargetWatts: Int? = null,
     val easyTargetWatts: Int? = null,
+    val age: Int? = null,
 ) {
     init {
         require(intervals >= 1) { "A 4x4 session needs at least one interval" }
     }
+
+    /** Age-estimated max heart rate (Tanaka 2001: 208 − 0.7 × age); null when age is unset. */
+    val estimatedHrMax: Int? get() = age?.let { (208 - 0.7 * it).roundToInt() }
+
+    /** Low edge of the 4x4 work-interval target band (85% HRmax); null when age is unset. */
+    val workHrLow: Int? get() = estimatedHrMax?.let { (0.85 * it).roundToInt() }
+
+    /** High edge of the 4x4 work-interval target band (95% HRmax); null when age is unset. */
+    val workHrHigh: Int? get() = estimatedHrMax?.let { (0.95 * it).roundToInt() }
 
     /** Ordered, non-overlapping segments that make up the full session. */
     val timeline: List<PhaseSegment> get() = buildTimeline()

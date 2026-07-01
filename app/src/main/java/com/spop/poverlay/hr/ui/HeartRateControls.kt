@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -73,17 +72,45 @@ fun HeartRateControls(onRequestPermissions: () -> Unit) {
                     ) { Text("Forget device") }
                 }
 
-                HrConnectionState.Scanning, HrConnectionState.Connecting -> {
+                HrConnectionState.Scanning -> {
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Searching for straps…")
+                        }
+                        if (discovered.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            discovered.forEach { device ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { HeartRateManager.connect(device.address) }
+                                        .padding(vertical = 12.dp),
+                                ) {
+                                    Text(
+                                        device.name,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        device.address,
+                                        fontSize = 12.sp,
+                                        color = Color.Gray,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { HeartRateManager.cancelScan() }) { Text("Cancel") }
+                    }
+                }
+
+                HrConnectionState.Connecting -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text(
-                            if (connectionState == HrConnectionState.Scanning) {
-                                "Searching for straps…"
-                            } else {
-                                "Connecting…"
-                            },
-                        )
+                        Text("Connecting…")
                     }
                 }
 
@@ -96,39 +123,6 @@ fun HeartRateControls(onRequestPermissions: () -> Unit) {
                 }
             }
         }
-    }
-
-    if (connectionState == HrConnectionState.Scanning) {
-        AlertDialog(
-            onDismissRequest = { HeartRateManager.stopScan() },
-            title = { Text("Select a heart-rate strap") },
-            text = {
-                if (discovered.isEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("Searching…")
-                    }
-                } else {
-                    Column {
-                        discovered.forEach { device ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { HeartRateManager.connect(device.address) }
-                                    .padding(vertical = 10.dp),
-                            ) {
-                                Text(device.name, fontWeight = FontWeight.SemiBold)
-                                Text(device.address, fontSize = 12.sp, color = Color.Gray)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { HeartRateManager.stopScan() }) { Text("Cancel") }
-            },
-        )
     }
 }
 

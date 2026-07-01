@@ -2,6 +2,7 @@ package com.spop.poverlay.hr
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -10,12 +11,11 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.SharedPreferences
-import android.os.ParcelUuid
+import android.os.Build
 import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,11 +72,17 @@ object HeartRateManager {
 
     private var scanJob: Job? = null
     private var reconnectJob: Job? = null
+    private var connectTimeoutJob: Job? = null
 
     // Distinguishes a deliberate teardown (user disconnect/forget) from an unexpected drop, so the
     // auto-reconnect only fires when the strap goes away on its own.
     @Volatile
     private var userInitiatedDisconnect = false
+
+    // Tracks whether this session ever reached a fully connected (HR service confirmed) state, so a
+    // failed initial connect to a wrong/remembered device does not trigger the auto-reconnect loop.
+    @Volatile
+    private var wasConnected = false
 
     @Synchronized
     fun init(context: Context) {
@@ -104,17 +110,25 @@ object HeartRateManager {
         }
         this.scanner = scanner
         stopScan()
+        // Tear down any pending auto-reconnect or half-open connection before scanning, so a stale
+        // reconnect attempt can't kill the manual scan we're about to start.
+        reconnectJob?.cancel()
+        reconnectJob = null
+        userInitiatedDisconnect = true   // suppress reconnect from the teardown below
+        closeGatt()                      // drop any in-flight/auto-reconnect attempt
         mutableDiscovered.value = emptyList()
         mutableConnectionState.value = HrConnectionState.Scanning
 
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(HEART_RATE_SERVICE_UUID))
-            .build()
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
         try {
-            scanner.startScan(listOf(filter), settings, scanCallback)
+            // No hardware ScanFilter: some HR straps advertise the 0x180D service UUID only in the
+            // scan response (or not until connected), and the offloaded service-UUID filter silently
+            // drops those. We surface candidates in onScanResult and confirm the Heart Rate service
+            // after connecting (see onServicesDiscovered).
+            scanner.startScan(null, settings, scanCallback)
+            Timber.i("HR BLE scan started (no service filter)")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing permission to start BLE scan")
             mutableConnectionState.value = HrConnectionState.Disconnected
@@ -136,11 +150,20 @@ object HeartRateManager {
     fun stopScan() {
         scanJob?.cancel()
         scanJob = null
+        Timber.i("HR BLE scan stopped")
         val scanner = scanner ?: return
         try {
             scanner.stopScan(scanCallback)
         } catch (e: SecurityException) {
             Timber.e(e, "Missing permission to stop BLE scan")
+        }
+    }
+
+    /** Stop an in-progress scan started from the UI and return to the disconnected state. */
+    fun cancelScan() {
+        stopScan()
+        if (mutableConnectionState.value == HrConnectionState.Scanning) {
+            mutableConnectionState.value = HrConnectionState.Disconnected
         }
     }
 
@@ -152,12 +175,18 @@ object HeartRateManager {
         }
         stopScan()
         userInitiatedDisconnect = false
+        wasConnected = false
         mutableConnectionState.value = HrConnectionState.Connecting
         try {
             val device = adapter.getRemoteDevice(address)
             closeGatt()
-            gatt = device.connectGatt(appContext, false, gattCallback)
+            gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            } else {
+                device.connectGatt(appContext, false, gattCallback)
+            }
             prefs.edit { putString(KEY_LAST_ADDRESS, address) }
+            startConnectTimeout()
         } catch (e: SecurityException) {
             Timber.e(e, "Missing permission to connect to HR strap")
             mutableConnectionState.value = HrConnectionState.Disconnected
@@ -192,8 +221,22 @@ object HeartRateManager {
         mutableConnectionState.value = HrConnectionState.Disconnected
     }
 
+    private fun startConnectTimeout() {
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = scope.launch {
+            delay(CONNECT_TIMEOUT_MS)
+            if (mutableConnectionState.value == HrConnectionState.Connecting) {
+                Timber.w("HR connect timed out after %d ms; giving up", CONNECT_TIMEOUT_MS)
+                closeGatt()
+                mutableConnectionState.value = HrConnectionState.Disconnected
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun closeGatt() {
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = null
         val current = gatt ?: return
         gatt = null
         try {
@@ -205,6 +248,9 @@ object HeartRateManager {
     }
 
     private fun scheduleReconnect() {
+        if (mutableConnectionState.value == HrConnectionState.Scanning ||
+            mutableConnectionState.value == HrConnectionState.Connecting
+        ) return
         if (userInitiatedDisconnect) return
         if (prefs.getString(KEY_LAST_ADDRESS, null) == null) return
         reconnectJob?.cancel()
@@ -217,17 +263,24 @@ object HeartRateManager {
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            val device = result?.device ?: return
+            val result = result ?: return
+            val device = result.device ?: return
             val address = device.address ?: return
-            val name = try {
+            val advertisesHeartRate =
+                result.scanRecord?.serviceUuids?.any { it.uuid == HEART_RATE_SERVICE_UUID } == true
+            val name = (try {
                 device.name
             } catch (e: SecurityException) {
                 null
-            } ?: "Heart-rate monitor"
-            // Dedupe by address; ignore repeated advertisements for an already-listed device.
+            }) ?: result.scanRecord?.deviceName
+            Timber.v("HR scan result: addr=%s name=%s hrService=%s", address, name, advertisesHeartRate)
+            // Surface every device (HR straps often advertise without a name or the 0x180D UUID until
+            // connected); fall back to the MAC so it is still selectable. The Heart Rate service is
+            // validated after connecting in onServicesDiscovered.
+            val display = name?.takeIf { it.isNotBlank() } ?: address
             val existing = mutableDiscovered.value
             if (existing.none { it.address == address }) {
-                mutableDiscovered.value = existing + HrDevice(name, address)
+                mutableDiscovered.value = existing + HrDevice(display, address)
             }
         }
 
@@ -240,6 +293,7 @@ object HeartRateManager {
     private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            Timber.i("HR onConnectionStateChange status=%d newState=%d", status, newState)
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     mutableConnectionState.value = HrConnectionState.Connecting
@@ -256,22 +310,34 @@ object HeartRateManager {
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    val reconnect = wasConnected
                     mutableBpm.value = null
                     mutableConnectionState.value = HrConnectionState.Disconnected
                     closeGatt()
-                    scheduleReconnect()
+                    if (reconnect) scheduleReconnect()
                 }
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Timber.w("HR service discovery failed status=%d", status)
+                mutableConnectionState.value = HrConnectionState.Disconnected
+                return
+            }
             val service = gatt.getService(HEART_RATE_SERVICE_UUID) ?: run {
                 Timber.w("Connected device exposes no Heart Rate Service")
+                mutableConnectionState.value = HrConnectionState.Disconnected
+                prefs.edit { remove(KEY_LAST_ADDRESS) }
+                mutableDeviceName.value = null
                 return
             }
             val characteristic = service.getCharacteristic(HEART_RATE_MEASUREMENT_UUID) ?: run {
                 Timber.w("Heart Rate Service has no measurement characteristic")
+                mutableConnectionState.value = HrConnectionState.Disconnected
+                prefs.edit { remove(KEY_LAST_ADDRESS) }
+                mutableDeviceName.value = null
                 return
             }
             try {
@@ -281,9 +347,13 @@ object HeartRateManager {
                     cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                     gatt.writeDescriptor(cccd)
                 }
+                connectTimeoutJob?.cancel()
+                wasConnected = true
                 mutableConnectionState.value = HrConnectionState.Connected
+                Timber.i("HR strap connected and notifications enabled")
             } catch (e: SecurityException) {
                 Timber.e(e, "Missing permission to enable HR notifications")
+                mutableConnectionState.value = HrConnectionState.Disconnected
             }
         }
 
@@ -300,8 +370,9 @@ object HeartRateManager {
     private const val KEY_LAST_ADDRESS = "lastDeviceAddress"
     private const val KEY_LAST_NAME = "lastDeviceName"
 
-    private const val SCAN_TIMEOUT_MS = 15_000L
+    private const val SCAN_TIMEOUT_MS = 30_000L
     private const val RECONNECT_DELAY_MS = 5_000L
+    private const val CONNECT_TIMEOUT_MS = 12_000L
 
     val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
     val HEART_RATE_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")

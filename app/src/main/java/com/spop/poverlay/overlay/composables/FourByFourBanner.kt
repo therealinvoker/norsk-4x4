@@ -47,6 +47,7 @@ private val WorkColor = Color(0xFFD9182B)
 private val RecoveryColor = Color(0xFF1E88E5)
 private val CoolDownColor = Color(0xFF26A69A)
 private val FinishedColor = Color(0xFFFFC107)
+private val PauseColor = Color(0xFF455A64)
 
 private fun PhaseType.accent() = when (this) {
     PhaseType.WarmUp -> WarmUpColor
@@ -63,7 +64,8 @@ private fun formatMmSs(totalSeconds: Int): String {
 
 /**
  * The live 4x4 banner shown on the overlay while a session is active (or just finished).
- * Tap toggles pause; long-press stops the session.
+ * Tap or the inline button toggles pause (which only stops the timer, keeping the banner up);
+ * long-press stops the session entirely.
  */
 @Composable
 fun FourByFourBanner(
@@ -75,9 +77,11 @@ fun FourByFourBanner(
     bestIntervalAvgWatts: Float?,
     currentIntervalAvgWatts: Float?,
     intervalTrace: List<Float>,
+    hrTrace: List<Int>,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
-    onStop: () -> Unit,
+    onPlayPause: () -> Unit,
+    onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val accent = state.phase.accent()
@@ -130,20 +134,29 @@ fun FourByFourBanner(
 
             Spacer(Modifier.width(12.dp))
 
-            // Its own clickable region wins for its bounds, so the tap reaches onStop instead of
-            // the banner-level tap=pause handler.
-            StopButton(onStop = onStop)
+            // These have their own clickable regions so taps hit the buttons, not the banner-level
+            // tap handler. While paused we surface Resume + Reset; while running, just Pause.
+            PauseControls(state = state, onPlayPause = onPlayPause, onReset = onReset)
         }
 
         Spacer(Modifier.height(6.dp))
         // During a work interval, pace against the best-ever interval average (the dashed line).
         // Otherwise fall back to the cumulative kJ-vs-best chip.
         if (state.phase.isHard && state.active) {
-            IntervalPaceRow(
-                bestAvg = bestIntervalAvgWatts,
-                currentAvg = currentIntervalAvgWatts,
-                trace = intervalTrace,
-            )
+            val hrMax = config.estimatedHrMax
+            val low = config.workHrLow
+            val high = config.workHrHigh
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IntervalPaceRow(
+                    bestAvg = bestIntervalAvgWatts,
+                    currentAvg = currentIntervalAvgWatts,
+                    trace = intervalTrace,
+                )
+                if (hrMax != null && low != null && high != null && currentHr != null) {
+                    Spacer(Modifier.width(20.dp))
+                    HrZoneRow(hrTrace = hrTrace, currentHr = currentHr, hrMax = hrMax, low = low, high = high)
+                }
+            }
             Spacer(Modifier.height(4.dp))
         } else if (vsBestKj != null && (state.active || state.finished)) {
             VsBestChip(vsBestKj)
@@ -166,19 +179,42 @@ private fun HeartRateChip(bpm: Int) {
     )
 }
 
-/** Compact red Stop control with its own tap handler so it isn't swallowed by the banner gesture. */
+/**
+ * Session controls on the banner. While running, a single Pause (timer only — the banner stays up).
+ * While paused, Resume + Reset; Reset restarts the workout from 0:00, discarding the current ride.
+ * Each button owns its own tap region so it isn't swallowed by the banner gesture. Hidden once the
+ * session is finished (dismiss via long-press).
+ */
 @Composable
-private fun StopButton(onStop: () -> Unit) {
+private fun PauseControls(
+    state: FourByFourState,
+    onPlayPause: () -> Unit,
+    onReset: () -> Unit,
+) {
+    if (!state.active) return
+    if (state.paused) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BannerButton(label = "▶ RESUME", background = EffortGood, onClick = onPlayPause)
+            Spacer(Modifier.width(8.dp))
+            BannerButton(label = "↻ RESET", background = WorkColor, onClick = onReset)
+        }
+    } else {
+        BannerButton(label = "❚❚ PAUSE", background = PauseColor, onClick = onPlayPause)
+    }
+}
+
+@Composable
+private fun BannerButton(label: String, background: Color, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(WorkColor)
-            .clickable { onStop() }
+            .background(background)
+            .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "■ STOP",
+            text = label,
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.Black,
@@ -318,6 +354,96 @@ private fun paceColor(currentAvg: Float?, bestAvg: Float?): Color {
         ratio >= 0.9f -> EffortClose
         else -> EffortOff
     }
+}
+
+private val HrZoneBandFill = Color(0x3343A047)
+private val HrZoneEdgeColor = Color(0xFF66BB6A)
+private val HrTraceColor = Color(0xFFD9182B)
+
+/**
+ * Live heart-rate readout for a work interval: the per-second HR trace plotted against the shaded
+ * 85–95% HRmax target band. Current bpm on the left is colored by whether it sits in the band.
+ */
+@Composable
+private fun HrZoneRow(hrTrace: List<Int>, currentHr: Int?, hrMax: Int, low: Int, high: Int) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Column(modifier = Modifier.width(86.dp), horizontalAlignment = Alignment.End) {
+            Text(
+                text = currentHr?.let { "$it" } ?: "–",
+                color = hrZoneColor(currentHr, low, high),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text("bpm", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+        }
+        Spacer(Modifier.width(10.dp))
+        HrZoneChart(
+            trace = hrTrace,
+            hrMax = hrMax,
+            low = low,
+            high = high,
+            modifier = Modifier.width(170.dp).height(42.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.width(58.dp)) {
+            Text("target", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text(
+                text = "$low–$high",
+                color = HrZoneEdgeColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HrZoneChart(
+    trace: List<Int>,
+    hrMax: Int,
+    low: Int,
+    high: Int,
+    modifier: Modifier = Modifier,
+) {
+    // Fixed window (50%–102% of HRmax) so the 85–95% band sits high in the frame regardless of trace.
+    val yMin = hrMax * 0.5f
+    val yMax = hrMax * 1.02f
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        fun y(v: Float) = h - ((v - yMin) / (yMax - yMin)).coerceIn(0f, 1f) * h
+        val bandTop = y(high.toFloat())
+        val bandBottom = y(low.toFloat())
+        drawRect(
+            color = HrZoneBandFill,
+            topLeft = Offset(0f, bandTop),
+            size = androidx.compose.ui.geometry.Size(w, (bandBottom - bandTop).coerceAtLeast(0f)),
+        )
+        drawLine(HrZoneEdgeColor, Offset(0f, bandTop), Offset(w, bandTop), strokeWidth = 1.5f)
+        drawLine(HrZoneEdgeColor, Offset(0f, bandBottom), Offset(w, bandBottom), strokeWidth = 1.5f)
+        if (trace.size >= 2) {
+            val dx = w / (trace.size - 1)
+            val path = Path().apply {
+                trace.forEachIndexed { i, v ->
+                    val px = i * dx
+                    val py = y(v.toFloat())
+                    if (i == 0) moveTo(px, py) else lineTo(px, py)
+                }
+            }
+            drawPath(path, color = HrTraceColor, style = Stroke(width = 3f))
+        }
+    }
+}
+
+private fun hrZoneColor(hr: Int?, low: Int, high: Int): Color = when {
+    hr == null -> Color.White
+    hr in low..high -> EffortGood
+    hr > high -> EffortClose
+    hr >= low - 8 -> EffortClose
+    else -> EffortOff
 }
 
 @Composable

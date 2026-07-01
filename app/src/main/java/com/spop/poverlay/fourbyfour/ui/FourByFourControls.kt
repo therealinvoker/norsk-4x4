@@ -85,6 +85,19 @@ fun FourByFourControls(
             }
 
             Spacer(Modifier.height(8.dp))
+            Text("Heart rate", fontWeight = FontWeight.SemiBold)
+            Stepper("Age", config.age?.let { "$it yr" } ?: "Off") { delta ->
+                FourByFour.updateConfig(config.copy(age = stepAge(config.age, delta)))
+            }
+            config.estimatedHrMax?.let { hrMax ->
+                Text(
+                    "Max HR ≈ $hrMax bpm · interval target ${config.workHrLow}–${config.workHrHigh} bpm",
+                    fontSize = 13.sp,
+                    color = Color.Gray,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Vibrate on phase change", modifier = Modifier.weight(1f), fontSize = 16.sp)
                 Switch(checked = cuesEnabled, onCheckedChange = { FourByFour.setCuesEnabled(it) })
@@ -154,4 +167,10 @@ private fun step(current: Int, delta: Int, unit: Int, min: Int, max: Int) =
 private fun stepWatts(current: Int?, delta: Int): Int? {
     val next = (current ?: 0) + delta * 5
     return if (next <= 0) null else next.coerceAtMost(600)
+}
+
+private fun stepAge(current: Int?, delta: Int): Int? {
+    if (current == null) return if (delta > 0) 30 else null
+    val next = current + delta
+    return if (next < 10) null else next.coerceAtMost(100)
 }

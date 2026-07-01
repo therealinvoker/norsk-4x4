@@ -59,6 +59,10 @@ object FourByFour {
     private val mutableCurrentIntervalTrace = MutableStateFlow<List<Float>>(emptyList())
     val currentIntervalTrace: StateFlow<List<Float>> = mutableCurrentIntervalTrace.asStateFlow()
 
+    /** Per-second heart-rate trace (bpm) of the work interval in progress; empty otherwise. */
+    private val mutableCurrentIntervalHrTrace = MutableStateFlow<List<Int>>(emptyList())
+    val currentIntervalHrTrace: StateFlow<List<Int>> = mutableCurrentIntervalHrTrace.asStateFlow()
+
     val state: StateFlow<FourByFourState> get() = engine.state
     val transitions: SharedFlow<PhaseTransition> get() = engine.transitions
 
@@ -69,6 +73,7 @@ object FourByFour {
     private var bestCumulativeKj: FloatArray? = null
     private var currentIntervalIndex = -1
     private val intervalPowers = ArrayList<Float>()
+    private val intervalHrs = ArrayList<Int>()
 
     // Wall-clock of the last moment the rider was actively pedaling (running, not paused). The
     // watchdog auto-stops the session if this goes stale, covering both "no pedaling" and "paused".
@@ -130,7 +135,9 @@ object FourByFour {
     private fun resetIntervalTracking() {
         currentIntervalIndex = -1
         intervalPowers.clear()
+        intervalHrs.clear()
         mutableCurrentIntervalTrace.value = emptyList()
+        mutableCurrentIntervalHrTrace.value = emptyList()
         mutableCurrentIntervalAvgWatts.value = null
     }
 
@@ -162,20 +169,26 @@ object FourByFour {
                 val bestAtNow = best[state.elapsedSec.coerceIn(0, best.size - 1)]
                 mutableLiveVsBestKj.value = (liveJoules / 1000.0).toFloat() - bestAtNow
             }
-            updateIntervalPace(state, power.coerceAtLeast(0f))
+            updateIntervalPace(state, power.coerceAtLeast(0f), hr)
         }
     }
 
-    /** Track the current work interval's power trace and running average for the pacing line. */
-    private fun updateIntervalPace(state: FourByFourState, power: Float) {
+    /** Track the current work interval's power/HR traces and running average for the pacing line. */
+    private fun updateIntervalPace(state: FourByFourState, power: Float, hr: Int?) {
         if (state.phase == PhaseType.Work) {
             if (state.intervalIndex != currentIntervalIndex) {
                 currentIntervalIndex = state.intervalIndex
                 intervalPowers.clear()
+                intervalHrs.clear()
+                mutableCurrentIntervalHrTrace.value = emptyList()
             }
             intervalPowers.add(power)
             mutableCurrentIntervalTrace.value = intervalPowers.toList()
             mutableCurrentIntervalAvgWatts.value = intervalPowers.average().toFloat()
+            if (hr != null && hr > 0) {
+                intervalHrs.add(hr)
+                mutableCurrentIntervalHrTrace.value = intervalHrs.toList()
+            }
         } else if (currentIntervalIndex != -1) {
             resetIntervalTracking()
         }
@@ -212,6 +225,7 @@ object FourByFour {
             putInt(KEY_INTERVALS, config.intervals)
             putInt(KEY_HARD_WATTS, config.hardTargetWatts ?: -1)
             putInt(KEY_EASY_WATTS, config.easyTargetWatts ?: -1)
+            putInt(KEY_AGE, config.age ?: -1)
         }
     }
 
@@ -230,6 +244,7 @@ object FourByFour {
             intervals = prefs.getInt(KEY_INTERVALS, default.intervals),
             hardTargetWatts = prefs.getInt(KEY_HARD_WATTS, -1).takeIf { it > 0 },
             easyTargetWatts = prefs.getInt(KEY_EASY_WATTS, -1).takeIf { it > 0 },
+            age = prefs.getInt(KEY_AGE, -1).takeIf { it > 0 },
         )
         mutableCuesEnabled.value = prefs.getBoolean(KEY_CUES, true)
     }
@@ -244,6 +259,7 @@ object FourByFour {
     private const val KEY_INTERVALS = "intervals"
     private const val KEY_HARD_WATTS = "hardTargetWatts"
     private const val KEY_EASY_WATTS = "easyTargetWatts"
+    private const val KEY_AGE = "age"
     private const val KEY_CUES = "cuesEnabled"
 }
 

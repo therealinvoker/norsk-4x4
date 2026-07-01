@@ -36,6 +36,7 @@ import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.fourbyfour.PhaseType
 import com.spop.poverlay.hr.HeartRateManager
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.interfaces.BackpedalCompensatingSensorInterface
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
@@ -101,7 +102,7 @@ class OverlayService : LifecycleEnabledService() {
             resources.displayMetrics.heightPixels.toFloat()
         )
 
-        val sensorInterface = if (IsRunningOnPeloton) {
+        val rawSensorInterface = if (IsRunningOnPeloton) {
             if (IsBikePlus) {
                 PelotonBikePlusSensorInterface(this).also {
                     lifecycle.addObserver(object : DefaultLifecycleObserver {
@@ -124,10 +125,22 @@ class OverlayService : LifecycleEnabledService() {
             EmulatorSensorInterface
         }
 
+        // Compensate for backpedaling (real cadence, ~0 measured power) so the gauge/graph/speed and
+        // recorded output treat a backward recovery spin like forward pedaling. Everything downstream
+        // reads through this wrapper; only power is synthesized.
+        val sensorInterface = BackpedalCompensatingSensorInterface(rawSensorInterface).also {
+            lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) {
+                    it.stop()
+                }
+            })
+        }
+
         val sensorViewModel = OverlaySensorViewModel(
             application,
             sensorInterface,
-            DeadSensorDetector(sensorInterface, this.coroutineContext)
+            // Dead-sensor detection watches the raw hardware feed, not the compensated power.
+            DeadSensorDetector(rawSensorInterface, this.coroutineContext)
         )
 
         val timerViewModel = OverlayTimerViewModel(

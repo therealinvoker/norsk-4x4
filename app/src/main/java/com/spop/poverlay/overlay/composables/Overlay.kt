@@ -73,6 +73,7 @@ fun Overlay(
     val bestIntervalAvgWatts by FourByFour.bestIntervalAvgWatts.collectAsStateWithLifecycle()
     val currentIntervalAvgWatts by FourByFour.currentIntervalAvgWatts.collectAsStateWithLifecycle()
     val intervalTrace by FourByFour.currentIntervalTrace.collectAsStateWithLifecycle()
+    val intervalHrTrace by FourByFour.currentIntervalHrTrace.collectAsStateWithLifecycle()
     val currentPowerRaw by sensorViewModel.powerRaw.collectAsStateWithLifecycle(initialValue = 0f)
     val currentHr by HeartRateManager.bpm.collectAsStateWithLifecycle()
 
@@ -230,9 +231,11 @@ fun Overlay(
                         bestIntervalAvgWatts = bestIntervalAvgWatts,
                         currentIntervalAvgWatts = currentIntervalAvgWatts,
                         intervalTrace = intervalTrace,
+                        hrTrace = intervalHrTrace,
                         onTap = { FourByFour.togglePause() },
                         onLongPress = { FourByFour.stop() },
-                        onStop = { FourByFour.stop() },
+                        onPlayPause = { FourByFour.togglePause() },
+                        onReset = { FourByFour.start() },
                         modifier = Modifier
                             .padding(horizontal = 6.dp)
                             .padding(bottom = 8.dp),

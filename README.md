@@ -24,9 +24,10 @@ a coach for the **Norwegian 4×4** interval protocol
 ([NTNU/CERG](https://www.ntnu.edu/cerg/advice)): a warm-up, then repeats of a hard work interval and
 an active recovery, then a cool-down.
 
-Because the Bike+ exposes **power (watts)** but not heart rate, intensity is driven and measured by
-power. The data model keeps an `hr` field reserved so a future Bluetooth HR strap can be added
-without a migration.
+Intensity in the 4×4 is driven and measured by **power (watts)**. The fork also supports a standard
+**Bluetooth heart-rate strap**: pair one and your live HR shows on the banner, the minimized strip,
+and in workout history — and if you enter your age, the banner draws a target HR zone during work
+intervals.
 
 > It installs under its own application id (`com.trudys.norsk4x4`), so it **coexists** with the
 > original grupetto app — both can be on the bike at once.
@@ -47,8 +48,23 @@ without a migration.
 - **Workout history** — every session is saved as JSON on the device (`history/`); a history screen
   lists rides and a detail screen shows stats plus a power-over-time chart with the work intervals
   shaded and your best ride drawn as a ghost line.
+- **Bluetooth heart-rate strap** — scan for and connect a standard BLE HR strap from the config
+  screen; the app remembers your last strap and **auto-reconnects** on the next ride. Live HR is
+  shown on the banner, the minimized strip, and in workout history.
+- **HR target zone** — enter your age and, during each work interval, the banner overlays a live
+  heart-rate trace against a shaded **85–95% HRmax** band (Tanaka estimate, `208 − 0.7 × age`),
+  drawn side-by-side with the power pacing chart.
+- **Backpedal compensation** — pedaling backward during recovery reports real cadence but ~0 W on
+  the Bike+ load cell, which would otherwise flatline power, speed, and the graph. The app detects
+  the backpedal signature (cadence present, ~0 power) and synthesizes a forward-equivalent power
+  from cadence + resistance, so a backward recovery spin behaves like forward pedaling everywhere —
+  gauge, graph, speed, and recorded output.
+- **Auto-stop & save** — if a running session sits idle (no pedaling, or paused) for 15 minutes it
+  is automatically stopped and saved.
 - **Haptic cues** on phase changes (toggleable), and a **vibrate-on-phase-change** setting.
-- Banner gestures: **tap to pause/resume**, **long-press to stop** the session.
+- Banner controls: **tap ❚❚ to pause** — this stops the clock but keeps the 4×4 on screen — then
+  **▶ resume** or **↻ reset** (restart from warm-up, discarding the current ride); **long-press to
+  stop** and save the session.
 
 ## Building & installing
 
