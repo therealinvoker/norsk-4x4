@@ -83,6 +83,10 @@ class OverlayService : LifecycleEnabledService() {
         startForeground(OverlayServiceId, prepareNotification(notificationManager))
 
         buildDialog()
+
+        // A ride is starting and Bluetooth permissions are typically granted by now, so (re)connect
+        // the remembered heart-rate strap without the user having to scan/pick again.
+        HeartRateManager.autoReconnect()
     }
 
     override fun onBind(intent: Intent?): IBinder? {

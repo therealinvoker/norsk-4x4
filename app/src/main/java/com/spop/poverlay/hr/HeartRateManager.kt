@@ -41,7 +41,8 @@ data class HrDevice(val name: String, val address: String)
  * Mirrors [com.spop.poverlay.fourbyfour.FourByFour]: a single shared instance owns the BLE
  * connection so both the overlay service (which reads [bpm] into the recorder) and the config
  * activity (which scans/picks/forgets a strap) observe the same source of truth. The last picked
- * device address is remembered in [SharedPreferences] so it can be auto-reconnected on launch.
+ * device address is remembered in [SharedPreferences] so it can be auto-reconnected on launch and
+ * whenever a ride starts, retrying until the strap is reachable.
  *
  * All BLE callbacks arrive on a binder thread; state is only mutated through the [MutableStateFlow]s
  * so observers always see consistent, thread-safe values.
@@ -79,11 +80,6 @@ object HeartRateManager {
     @Volatile
     private var userInitiatedDisconnect = false
 
-    // Tracks whether this session ever reached a fully connected (HR service confirmed) state, so a
-    // failed initial connect to a wrong/remembered device does not trigger the auto-reconnect loop.
-    @Volatile
-    private var wasConnected = false
-
     @Synchronized
     fun init(context: Context) {
         if (initialized) return
@@ -96,8 +92,18 @@ object HeartRateManager {
         mutableDeviceName.value = prefs.getString(KEY_LAST_NAME, null)
     }
 
-    /** Connect to the remembered strap (if any). Safe to call before permissions are granted. */
+    /**
+     * Connect to the remembered strap (if any) and keep retrying until it is reachable. Safe to call
+     * repeatedly (e.g. on app start and when a ride begins) and before permissions are granted; it
+     * no-ops while a connection is already up or in progress.
+     */
     fun autoReconnect() {
+        when (mutableConnectionState.value) {
+            HrConnectionState.Connected,
+            HrConnectionState.Connecting,
+            HrConnectionState.Scanning -> return
+            HrConnectionState.Disconnected -> Unit
+        }
         val address = prefs.getString(KEY_LAST_ADDRESS, null) ?: return
         connect(address)
     }
@@ -165,6 +171,12 @@ object HeartRateManager {
         if (mutableConnectionState.value == HrConnectionState.Scanning) {
             mutableConnectionState.value = HrConnectionState.Disconnected
         }
+        // startScan() set userInitiatedDisconnect to suppress reconnect; if a strap is still
+        // remembered, resume auto-reconnecting to it now that the manual scan is cancelled.
+        if (prefs.getString(KEY_LAST_ADDRESS, null) != null) {
+            userInitiatedDisconnect = false
+            scheduleReconnect()
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -175,7 +187,6 @@ object HeartRateManager {
         }
         stopScan()
         userInitiatedDisconnect = false
-        wasConnected = false
         mutableConnectionState.value = HrConnectionState.Connecting
         try {
             val device = adapter.getRemoteDevice(address)
@@ -226,9 +237,10 @@ object HeartRateManager {
         connectTimeoutJob = scope.launch {
             delay(CONNECT_TIMEOUT_MS)
             if (mutableConnectionState.value == HrConnectionState.Connecting) {
-                Timber.w("HR connect timed out after %d ms; giving up", CONNECT_TIMEOUT_MS)
+                Timber.w("HR connect timed out after %d ms; will retry", CONNECT_TIMEOUT_MS)
                 closeGatt()
                 mutableConnectionState.value = HrConnectionState.Disconnected
+                scheduleReconnect()
             }
         }
     }
@@ -310,11 +322,13 @@ object HeartRateManager {
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    val reconnect = wasConnected
                     mutableBpm.value = null
                     mutableConnectionState.value = HrConnectionState.Disconnected
                     closeGatt()
-                    if (reconnect) scheduleReconnect()
+                    // Retry whether the drop followed a good session or a failed initial attempt; a
+                    // wrong/absent device is handled by clearing the remembered address elsewhere,
+                    // which makes scheduleReconnect() self-stop.
+                    scheduleReconnect()
                 }
             }
         }
@@ -322,8 +336,10 @@ object HeartRateManager {
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                Timber.w("HR service discovery failed status=%d", status)
+                Timber.w("HR service discovery failed status=%d; will retry", status)
                 mutableConnectionState.value = HrConnectionState.Disconnected
+                closeGatt()
+                scheduleReconnect()
                 return
             }
             val service = gatt.getService(HEART_RATE_SERVICE_UUID) ?: run {
@@ -348,7 +364,6 @@ object HeartRateManager {
                     gatt.writeDescriptor(cccd)
                 }
                 connectTimeoutJob?.cancel()
-                wasConnected = true
                 mutableConnectionState.value = HrConnectionState.Connected
                 Timber.i("HR strap connected and notifications enabled")
             } catch (e: SecurityException) {
