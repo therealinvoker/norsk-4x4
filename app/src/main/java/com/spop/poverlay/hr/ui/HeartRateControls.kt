@@ -9,11 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,96 +28,87 @@ import com.spop.poverlay.hr.HrConnectionState
 import com.spop.poverlay.hr.HeartRateManager
 
 /**
- * Heart-rate-monitor card for the config screen. Reads the shared [HeartRateManager] flows and
- * drives its scan/connect/forget API directly, mirroring
- * [com.spop.poverlay.fourbyfour.ui.FourByFourControls].
+ * Heart-rate-monitor controls rendered inline as a section of the Norwegian 4×4 settings card
+ * (see [com.spop.poverlay.fourbyfour.ui.FourByFourControls]). Reads the shared [HeartRateManager]
+ * flows and drives its scan/connect/forget API directly.
  *
  * @param onRequestPermissions invoked when the user asks to connect a strap; the host activity is
  * responsible for granting Bluetooth permissions and then calling [HeartRateManager.startScan].
  */
 @Composable
-fun HeartRateControls(onRequestPermissions: () -> Unit) {
+fun HeartRateSection(onRequestPermissions: () -> Unit) {
     val connectionState by HeartRateManager.connectionState.collectAsStateWithLifecycle()
     val bpm by HeartRateManager.bpm.collectAsStateWithLifecycle()
     val deviceName by HeartRateManager.deviceName.collectAsStateWithLifecycle()
     val discovered by HeartRateManager.discovered.collectAsStateWithLifecycle()
 
-    Card(
-        modifier = Modifier
-            .widthIn(max = 720.dp)
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Text("Heart-rate monitor", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-            Text(
-                statusLine(connectionState, bpm),
-                fontSize = 16.sp,
-                color = Color.Gray,
-            )
-            deviceName?.let {
-                Text("Strap: $it", fontSize = 14.sp, color = Color.Gray)
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            statusLine(connectionState, bpm),
+            fontSize = 14.sp,
+            color = Color.Gray,
+        )
+        deviceName?.let {
+            Text("Strap: $it", fontSize = 13.sp, color = Color.Gray)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        when (connectionState) {
+            HrConnectionState.Connected -> {
+                OutlinedButton(
+                    onClick = { HeartRateManager.forget() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Forget device") }
             }
 
-            Spacer(Modifier.height(16.dp))
-            when (connectionState) {
-                HrConnectionState.Connected -> {
-                    OutlinedButton(
-                        onClick = { HeartRateManager.forget() },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Forget device") }
-                }
-
-                HrConnectionState.Scanning -> {
-                    Column(Modifier.fillMaxWidth()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Searching for straps…")
-                        }
-                        if (discovered.isNotEmpty()) {
-                            Spacer(Modifier.height(12.dp))
-                            discovered.forEach { device ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { HeartRateManager.connect(device.address) }
-                                        .padding(vertical = 12.dp),
-                                ) {
-                                    Text(
-                                        device.name,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    Text(
-                                        device.address,
-                                        fontSize = 12.sp,
-                                        color = Color.Gray,
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = { HeartRateManager.cancelScan() }) { Text("Cancel") }
-                    }
-                }
-
-                HrConnectionState.Connecting -> {
+            HrConnectionState.Scanning -> {
+                Column(Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text("Connecting…")
+                        Text("Searching for straps…")
                     }
+                    if (discovered.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        discovered.forEach { device ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { HeartRateManager.connect(device.address, device.name) }
+                                    .padding(vertical = 12.dp),
+                            ) {
+                                Text(
+                                    device.name,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    device.address,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { HeartRateManager.cancelScan() }) { Text("Cancel") }
                 }
+            }
 
-                HrConnectionState.Disconnected -> {
-                    Button(
-                        onClick = onRequestPermissions,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9182B)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Connect heart-rate strap", color = Color.White) }
+            HrConnectionState.Connecting -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Connecting…")
                 }
+            }
+
+            HrConnectionState.Disconnected -> {
+                Button(
+                    onClick = onRequestPermissions,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9182B)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Connect heart-rate strap", color = Color.White) }
             }
         }
     }

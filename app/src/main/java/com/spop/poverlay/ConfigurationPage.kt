@@ -1,10 +1,7 @@
 package com.spop.poverlay
 
-import android.os.Build
-import android.text.format.DateUtils
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -12,21 +9,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.fourbyfour.ui.FourByFourControls
-import com.spop.poverlay.hr.ui.HeartRateControls
-import com.spop.poverlay.releases.Release
-import com.spop.poverlay.ui.theme.ErrorColor
-import com.spop.poverlay.ui.theme.LatoFontFamily
 
 
 @Composable
@@ -36,7 +23,6 @@ fun ConfigurationPage(
     onConnectHrm: () -> Unit = {},
 ) {
     val showPermissionInfo by remember { viewModel.showPermissionInfo }
-    val latestRelease by remember { viewModel.latestRelease }
 
     Column(
         Modifier
@@ -49,20 +35,10 @@ fun ConfigurationPage(
         if (showPermissionInfo) {
             PermissionPage(viewModel::onGrantPermissionClicked)
         } else {
-            val timerShownWhenMinimized by viewModel.showTimerWhenMinimized
-                .collectAsStateWithLifecycle(
-                    initialValue = true
-                )
             StartServicePage(
-                timerShownWhenMinimized,
-                viewModel::onShowTimerWhenMinimizedClicked,
-                viewModel::onStartServiceClicked,
-                viewModel::onStartFourByFourClicked,
-                onOpenHistory,
-                onConnectHrm,
-                viewModel::onRestartClicked,
-                viewModel::onClickedRelease,
-                latestRelease
+                onClickedStartFourByFour = viewModel::onStartFourByFourClicked,
+                onOpenHistory = onOpenHistory,
+                onConnectHrm = onConnectHrm,
             )
         }
     }
@@ -70,114 +46,14 @@ fun ConfigurationPage(
 
 @Composable
 private fun StartServicePage(
-    timerShownWhenMinimized: Boolean,
-    onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
-    onClickedStartOverlay: () -> Unit,
     onClickedStartFourByFour: () -> Unit,
     onOpenHistory: () -> Unit,
     onConnectHrm: () -> Unit,
-    onClickedRestartApp: () -> Unit,
-    onClickedRelease: (Release) -> Unit,
-    latestRelease: Release?
 ) {
-    Text(
-        text = "Norsk 4×4",
-        fontSize = 50.sp,
-        fontWeight = FontWeight.Bold
-    )
-    Text(
-        text = "Norwegian 4×4 interval training for your Peloton bike",
-        fontSize = 22.sp,
-        fontStyle = FontStyle.Italic,
-    )
-    Text(
-        text = "Note: Not endorsed with, associated with, or supported by Peloton",
-        fontSize = 16.sp,
-        fontStyle = FontStyle.Italic,
-        fontWeight = FontWeight.Bold
-    )
-    Spacer(modifier = Modifier.height(40.dp))
-    Button(
-        onClick = onClickedStartOverlay,
-    ) {
-        Text(
-            text = "Click here to start the overlay",
-            fontSize = 30.sp,
-            fontFamily = LatoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontStyle = FontStyle.Italic,
-        )
-    }
-    Spacer(modifier = Modifier.height(100.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "Show timer when the overlay minimized?",
-            fontSize = 20.sp
-        )
-        Checkbox(
-            checked = timerShownWhenMinimized,
-            onCheckedChange = onTimerShownWhenMinimizedToggled
-        )
-    }
-
-    Spacer(modifier = Modifier.height(32.dp))
     FourByFourControls(
         onStart = onClickedStartFourByFour,
         onOpenHistory = onOpenHistory,
-    )
-
-    Spacer(modifier = Modifier.height(16.dp))
-    HeartRateControls(onRequestPermissions = onConnectHrm)
-
-    Spacer(modifier = Modifier.height(40.dp))
-
-    if (latestRelease == null) {
-        Text(text = "Couldn't check for updates")
-    } else {
-        val formattedDate = DateUtils.getRelativeTimeSpanString(latestRelease.createdAt.time)
-        val releaseText = if (latestRelease.isCurrentlyInstalled) {
-            buildAnnotatedString {
-                "Grupetto is up to date: ${latestRelease.tagName} • $formattedDate • ${latestRelease.friendlyName}"
-            }
-        } else {
-            buildAnnotatedString {
-                append("⭐ ")
-                withStyle(style = SpanStyle(textDecoration = TextDecoration.Underline)) {
-                    append("New version released $formattedDate: ${latestRelease.friendlyName}.")
-                }
-            }
-        }
-        ClickableText(
-            text = releaseText,
-            style = LocalTextStyle.current.copy(
-                fontSize = 20.sp,
-                color = LocalContentColor.current
-            )
-        ) {
-            onClickedRelease(latestRelease)
-        }
-    }
-
-
-    Spacer(modifier = Modifier.height(40.dp))
-    Button(
-        onClick = onClickedRestartApp,
-        colors = ButtonDefaults.buttonColors(containerColor = ErrorColor),
-    ) {
-        Text(
-            text = "Restart Grupetto",
-            fontSize = 20.sp,
-            fontStyle = FontStyle.Italic,
-            color = Color.White
-        )
-    }
-    Spacer(modifier = Modifier.height(10.dp))
-
-    Text(
-        "Device: ${Build.DEVICE}\t" +
-                "SDK: ${Build.VERSION.RELEASE}\t" +
-                "OS Version: ${Build.FINGERPRINT}\t",
-        color = LocalContentColor.current.copy(alpha = .5f)
+        onConnectHrm = onConnectHrm,
     )
 }
 

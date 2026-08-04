@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.fourbyfour.ProtocolConfig
+import com.spop.poverlay.hr.ui.HeartRateSection
 
 /**
  * Settings + start/stop controls for the Norwegian 4x4 session, shown on the config screen.
@@ -37,6 +38,7 @@ import com.spop.poverlay.fourbyfour.ProtocolConfig
 fun FourByFourControls(
     onStart: () -> Unit,
     onOpenHistory: () -> Unit,
+    onConnectHrm: () -> Unit,
 ) {
     val config by FourByFour.config.collectAsStateWithLifecycle()
     val state by FourByFour.state.collectAsStateWithLifecycle()
@@ -96,6 +98,9 @@ fun FourByFourControls(
                     color = Color.Gray,
                 )
             }
+
+            Spacer(Modifier.height(8.dp))
+            HeartRateSection(onRequestPermissions = onConnectHrm)
 
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

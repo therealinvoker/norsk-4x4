@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,8 +43,10 @@ data class HrDevice(val name: String, val address: String)
  * Mirrors [com.spop.poverlay.fourbyfour.FourByFour]: a single shared instance owns the BLE
  * connection so both the overlay service (which reads [bpm] into the recorder) and the config
  * activity (which scans/picks/forgets a strap) observe the same source of truth. The last picked
- * device address is remembered in [SharedPreferences] so it can be auto-reconnected on launch and
- * whenever a ride starts, retrying until the strap is reachable.
+ * device address is remembered in [SharedPreferences]. Auto-reconnect runs an active scan for that
+ * exact address and does a direct connect the instant the strap advertises — the OS
+ * `autoConnect=true` whitelist path is unreliable on this device (it arms but never fires), so we
+ * find-then-connect ourselves.
  *
  * All BLE callbacks arrive on a binder thread; state is only mutated through the [MutableStateFlow]s
  * so observers always see consistent, thread-safe values.
@@ -73,12 +77,18 @@ object HeartRateManager {
 
     private var scanJob: Job? = null
     private var reconnectJob: Job? = null
+    private var reconnectScanJob: Job? = null
     private var connectTimeoutJob: Job? = null
 
     // Distinguishes a deliberate teardown (user disconnect/forget) from an unexpected drop, so the
     // auto-reconnect only fires when the strap goes away on its own.
     @Volatile
     private var userInitiatedDisconnect = false
+
+    // Address the reconnect scan is hunting for. The dedicated reconnect scan callback only acts on a
+    // result whose address matches this; cleared once we start connecting or give up.
+    @Volatile
+    private var reconnectTarget: String? = null
 
     @Synchronized
     fun init(context: Context) {
@@ -104,8 +114,70 @@ object HeartRateManager {
             HrConnectionState.Scanning -> return
             HrConnectionState.Disconnected -> Unit
         }
+        // A reconnect scan is already hunting for the strap.
+        if (reconnectScanJob?.isActive == true) return
         val address = prefs.getString(KEY_LAST_ADDRESS, null) ?: return
-        connect(address)
+        startReconnectScan(address)
+    }
+
+    /**
+     * Actively scan for the remembered [address] and direct-connect the instant it advertises. This
+     * replaces the OS `autoConnect=true` whitelist path, which arms but never completes on this
+     * device. Scans in windows with short idle gaps (to avoid the Android continuous-scan throttle)
+     * until the strap appears or a manual scan/connect/teardown supersedes it.
+     */
+    @SuppressLint("MissingPermission")
+    private fun startReconnectScan(address: String) {
+        val scanner = adapter?.bluetoothLeScanner ?: run {
+            Timber.w("Cannot auto-reconnect HR strap: no Bluetooth LE scanner available")
+            return
+        }
+        this.scanner = scanner
+        userInitiatedDisconnect = false
+        reconnectTarget = address
+        reconnectScanJob?.cancel()
+
+        val filters = listOf(ScanFilter.Builder().setDeviceAddress(address).build())
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        reconnectScanJob = scope.launch {
+            Timber.i("HR reconnect scan started for %s", address)
+            while (isActive &&
+                reconnectTarget == address &&
+                mutableConnectionState.value == HrConnectionState.Disconnected
+            ) {
+                try {
+                    scanner.startScan(filters, settings, reconnectScanCallback)
+                } catch (e: SecurityException) {
+                    Timber.e(e, "Missing permission for HR reconnect scan")
+                    reconnectTarget = null
+                    return@launch
+                }
+                delay(RECONNECT_SCAN_WINDOW_MS)
+                try {
+                    scanner.stopScan(reconnectScanCallback)
+                } catch (e: SecurityException) {
+                    Timber.e(e, "Missing permission to stop HR reconnect scan")
+                }
+                // Still no strap — rest the radio briefly, then look again.
+                if (reconnectTarget == address) delay(RECONNECT_SCAN_GAP_MS)
+            }
+        }
+    }
+
+    /** Cancel any in-progress reconnect scan (used when a manual scan/connect/teardown takes over). */
+    @SuppressLint("MissingPermission")
+    private fun stopReconnectScan() {
+        reconnectTarget = null
+        reconnectScanJob?.cancel()
+        reconnectScanJob = null
+        try {
+            scanner?.stopScan(reconnectScanCallback)
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing permission to stop HR reconnect scan")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -118,6 +190,7 @@ object HeartRateManager {
         stopScan()
         // Tear down any pending auto-reconnect or half-open connection before scanning, so a stale
         // reconnect attempt can't kill the manual scan we're about to start.
+        stopReconnectScan()
         reconnectJob?.cancel()
         reconnectJob = null
         userInitiatedDisconnect = true   // suppress reconnect from the teardown below
@@ -179,15 +252,26 @@ object HeartRateManager {
         }
     }
 
+    /**
+     * Connect to [address]. Pass the friendly [name] discovered during scanning so it is remembered
+     * even if the peripheral never reports its name over GATT. Always a direct connect
+     * (autoConnect=false): the reconnect scan only calls this once the strap is confirmed
+     * advertising, so a direct connect is both fast and reliable.
+     */
     @SuppressLint("MissingPermission")
-    fun connect(address: String) {
+    fun connect(address: String, name: String? = null) {
         val adapter = adapter ?: run {
             Timber.w("Cannot connect to HR strap: no Bluetooth adapter")
             return
         }
         stopScan()
+        stopReconnectScan()
         userInitiatedDisconnect = false
-        mutableConnectionState.value = HrConnectionState.Connecting
+        // Remember a readable label straight away, so the strap never shows only its MAC address.
+        if (!name.isNullOrBlank() && name != address) {
+            mutableDeviceName.value = name
+            prefs.edit { putString(KEY_LAST_NAME, name) }
+        }
         try {
             val device = adapter.getRemoteDevice(address)
             closeGatt()
@@ -197,6 +281,7 @@ object HeartRateManager {
                 device.connectGatt(appContext, false, gattCallback)
             }
             prefs.edit { putString(KEY_LAST_ADDRESS, address) }
+            mutableConnectionState.value = HrConnectionState.Connecting
             startConnectTimeout()
         } catch (e: SecurityException) {
             Timber.e(e, "Missing permission to connect to HR strap")
@@ -210,6 +295,7 @@ object HeartRateManager {
     /** Tear down the active connection without forgetting the remembered strap. */
     fun disconnect() {
         userInitiatedDisconnect = true
+        stopReconnectScan()
         reconnectJob?.cancel()
         reconnectJob = null
         closeGatt()
@@ -220,6 +306,7 @@ object HeartRateManager {
     /** Forget the remembered strap entirely and disconnect. */
     fun forget() {
         userInitiatedDisconnect = true
+        stopReconnectScan()
         reconnectJob?.cancel()
         reconnectJob = null
         closeGatt()
@@ -299,6 +386,35 @@ object HeartRateManager {
         override fun onScanFailed(errorCode: Int) {
             Timber.e("BLE scan failed with error $errorCode")
             mutableConnectionState.value = HrConnectionState.Disconnected
+        }
+    }
+
+    // Separate from scanCallback: only reacts to the remembered strap and immediately direct-connects
+    // it, without touching the UI discovered-list or the manual-scan state machine.
+    private val reconnectScanCallback = object : ScanCallback() {
+        @SuppressLint("MissingPermission")
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            val address = result?.device?.address ?: return
+            val target = reconnectTarget ?: return
+            if (!address.equals(target, ignoreCase = true)) return
+            Timber.i("HR reconnect scan matched %s; direct-connecting", address)
+            reconnectTarget = null
+            reconnectScanJob?.cancel()
+            try {
+                scanner?.stopScan(this)
+            } catch (e: SecurityException) {
+                Timber.e(e, "Missing permission to stop HR reconnect scan")
+            }
+            val name = (try {
+                result.device?.name
+            } catch (e: SecurityException) {
+                null
+            }) ?: result.scanRecord?.deviceName
+            connect(address, name)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            Timber.e("HR reconnect scan failed with error $errorCode")
         }
     }
 
@@ -388,6 +504,10 @@ object HeartRateManager {
     private const val SCAN_TIMEOUT_MS = 30_000L
     private const val RECONNECT_DELAY_MS = 5_000L
     private const val CONNECT_TIMEOUT_MS = 12_000L
+
+    // Reconnect scan cadence: scan hard for a window, rest briefly, repeat until the strap appears.
+    private const val RECONNECT_SCAN_WINDOW_MS = 20_000L
+    private const val RECONNECT_SCAN_GAP_MS = 4_000L
 
     val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
     val HEART_RATE_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")

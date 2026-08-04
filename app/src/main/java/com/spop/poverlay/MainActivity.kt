@@ -95,6 +95,9 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launchWhenResumed {
             viewModel.onResume()
+            // (Re)arm background auto-connect for the remembered strap whenever the screen is shown,
+            // not only at cold process start, so it connects as soon as the strap powers on.
+            HeartRateManager.autoReconnect()
         }
     }
 
