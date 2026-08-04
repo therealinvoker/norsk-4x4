@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
@@ -50,12 +51,23 @@ class ConfigurationViewModel(
     }
 
     fun onStartServiceClicked() {
+        startOverlayService()
+        finishActivity.value = Unit
+    }
+
+    /** Start the overlay (if needed) and immediately begin a 4x4 session, then close the config UI. */
+    fun onStartFourByFourClicked() {
+        startOverlayService()
+        FourByFour.start()
+        finishActivity.value = Unit
+    }
+
+    private fun startOverlayService() {
         Timber.i("Starting service")
         ContextCompat.startForegroundService(
             getApplication(),
             Intent(getApplication(), OverlayService::class.java)
         )
-        finishActivity.value = Unit
     }
 
     fun onGrantPermissionClicked() {

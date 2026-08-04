@@ -71,6 +71,11 @@ class OverlaySensorViewModel(
 
     private var useMph = MutableStateFlow(true)
 
+    // Raw (unformatted) sensor flows, used for recording sessions and comparing against targets.
+    val powerRaw = sensorInterface.power
+    val cadenceRaw = sensorInterface.cadence
+    val resistanceRaw = sensorInterface.resistance
+
     val powerValue = sensorInterface.power
         .map { "%.0f".format(it) }
     val rpmValue = sensorInterface.cadence
