@@ -55,9 +55,13 @@ private data class Sample(val power: Float, val cadence: Float, val resistance: 
 
 class OverlayService : LifecycleEnabledService() {
     companion object {
+        // FLAG_KEEP_SCREEN_ON keeps the tablet awake while the overlay is visible, so it can't doze
+        // mid-ride and drop the serial cadence feed — a per-ride backstop on top of the system's
+        // stay-on-while-plugged-in setting.
         private const val DefaultOverlayFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
                 or LayoutParams.FLAG_NOT_FOCUSABLE
-                or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+                or LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                or LayoutParams.FLAG_KEEP_SCREEN_ON)
 
 
         private const val OverlayServiceId = 2032
@@ -140,12 +144,23 @@ class OverlayService : LifecycleEnabledService() {
             })
         }
 
+        // Dead-sensor detection watches the raw hardware feed, not the compensated power.
+        val deadSensorDetector = DeadSensorDetector(rawSensorInterface, this.coroutineContext)
         val sensorViewModel = OverlaySensorViewModel(
             application,
             sensorInterface,
-            // Dead-sensor detection watches the raw hardware feed, not the compensated power.
-            DeadSensorDetector(rawSensorInterface, this.coroutineContext)
+            deadSensorDetector
         )
+
+        // If the sensor feed stalls (e.g. the Peloton service dropped after the tablet slept),
+        // rebind the sensor service automatically instead of making the rider unplug the bike. The
+        // rebind re-emits a fresh binder, which transparently restarts every downstream sensor flow.
+        lifecycleScope.launch(Dispatchers.IO) {
+            deadSensorDetector.deadSensorDetected.collect {
+                Timber.w("Dead sensor detected; attempting sensor service reconnect")
+                rawSensorInterface.reconnect()
+            }
+        }
 
         val timerViewModel = OverlayTimerViewModel(
             application,
@@ -184,7 +199,8 @@ class OverlayService : LifecycleEnabledService() {
 
         val defaultFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
                 or LayoutParams.FLAG_NOT_FOCUSABLE
-                or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+                or LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                or LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val overlayParams = LayoutParams(
             200,

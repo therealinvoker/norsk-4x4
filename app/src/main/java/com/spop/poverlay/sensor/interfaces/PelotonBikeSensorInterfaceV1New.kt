@@ -52,6 +52,17 @@ class PelotonBikeSensorInterfaceV1New(val context: Context) : SensorInterface, C
         coroutineContext.cancelChildren()
     }
 
+    override fun reconnect() {
+        launch(Dispatchers.IO) {
+            try {
+                Timber.i("Reconnecting V1New sensor service")
+                binder.emit(getV1NewBinder(context))
+            } catch (e: Exception) {
+                Timber.w(e, "V1New sensor reconnect failed: ${e.message}")
+            }
+        }
+    }
+
     override val power: Flow<Float>
         get() = binder.flatMapLatest { binder ->
             val powerSensor = V1NewPowerSensor(binder)

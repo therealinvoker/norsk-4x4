@@ -7,6 +7,7 @@ import com.spop.poverlay.sensor.v2.BikePlusResistanceSensor
 import com.spop.poverlay.sensor.v2.BikePlusRpmSensor
 import com.spop.poverlay.sensor.v2.getV2Binder
 import com.spop.poverlay.util.windowed
+import timber.log.Timber
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,6 +38,17 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
 
     fun stop() {
         coroutineContext.cancelChildren()
+    }
+
+    override fun reconnect() {
+        launch(Dispatchers.IO) {
+            try {
+                Timber.i("Reconnecting Bike+ sensor service")
+                binder.emit(getV2Binder(context))
+            } catch (e: Exception) {
+                Timber.w(e, "Bike+ sensor reconnect failed: ${e.message}")
+            }
+        }
     }
 
     override val power: Flow<Float>

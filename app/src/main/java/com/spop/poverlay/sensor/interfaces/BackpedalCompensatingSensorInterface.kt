@@ -47,4 +47,6 @@ class BackpedalCompensatingSensorInterface(
     fun stop() {
         scope.cancel()
     }
+
+    override fun reconnect() = delegate.reconnect()
 }
