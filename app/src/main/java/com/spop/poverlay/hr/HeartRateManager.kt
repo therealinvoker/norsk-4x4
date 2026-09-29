@@ -90,6 +90,12 @@ object HeartRateManager {
     @Volatile
     private var reconnectTarget: String? = null
 
+    // Device Information Service fields read after connecting, then combined into a friendly label.
+    @Volatile
+    private var manufacturerName: String? = null
+    @Volatile
+    private var modelNumber: String? = null
+
     @Synchronized
     fun init(context: Context) {
         if (initialized) return
@@ -373,10 +379,21 @@ object HeartRateManager {
                 null
             }) ?: result.scanRecord?.deviceName
             Timber.v("HR scan result: addr=%s name=%s hrService=%s", address, name, advertisesHeartRate)
-            // Surface every device (HR straps often advertise without a name or the 0x180D UUID until
-            // connected); fall back to the MAC so it is still selectable. The Heart Rate service is
-            // validated after connecting in onServicesDiscovered.
-            val display = name?.takeIf { it.isNotBlank() } ?: address
+            // Skip nameless non-HR devices: the air is full of phones/beacons advertising neither a
+            // name nor the 0x180D service, and listing them as bare MAC addresses buries the actual
+            // strap. Anything advertising the HR service or a readable name stays a candidate.
+            if (!advertisesHeartRate && name.isNullOrBlank()) return
+            // Prefer the saved friendly name for a strap we've connected before (e.g. "HRM808S" from
+            // its Device Information Service, rather than the advertised model+serial); then the
+            // advertised name; finally the MAC as a last resort so a nameless HR device is selectable.
+            val remembered = prefs.getString(KEY_LAST_ADDRESS, null)
+            val rememberedName = prefs.getString(KEY_LAST_NAME, null)
+            val display = when {
+                address.equals(remembered, ignoreCase = true) && !rememberedName.isNullOrBlank() ->
+                    rememberedName
+                !name.isNullOrBlank() -> name
+                else -> address
+            }
             val existing = mutableDiscovered.value
             if (existing.none { it.address == address }) {
                 mutableDiscovered.value = existing + HrDevice(display, address)
@@ -426,10 +443,14 @@ object HeartRateManager {
                 BluetoothProfile.STATE_CONNECTED -> {
                     mutableConnectionState.value = HrConnectionState.Connecting
                     try {
-                        val name = gatt.device?.name
-                        if (name != null) {
-                            mutableDeviceName.value = name
-                            prefs.edit { putString(KEY_LAST_NAME, name) }
+                        // Only adopt the advertised GATT name if we have nothing better yet. The
+                        // pick-time name and the Device Information Service read (applyFriendlyName)
+                        // own the label; don't let the advertised model+serial clobber "HRM808S".
+                        if (mutableDeviceName.value.isNullOrBlank()) {
+                            gatt.device?.name?.let { name ->
+                                mutableDeviceName.value = name
+                                prefs.edit { putString(KEY_LAST_NAME, name) }
+                            }
                         }
                         gatt.discoverServices()
                     } catch (e: SecurityException) {
@@ -473,11 +494,17 @@ object HeartRateManager {
                 return
             }
             try {
+                manufacturerName = null
+                modelNumber = null
                 gatt.setCharacteristicNotification(characteristic, true)
                 val cccd = characteristic.getDescriptor(CLIENT_CONFIG_UUID)
                 if (cccd != null) {
                     cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    // Reading the Device Information Service is chained off onDescriptorWrite so the
+                    // notification enable and the metadata reads don't overlap (GATT is one-at-a-time).
                     gatt.writeDescriptor(cccd)
+                } else {
+                    readDeviceInfo(gatt)
                 }
                 connectTimeoutJob?.cancel()
                 mutableConnectionState.value = HrConnectionState.Connected
@@ -488,6 +515,38 @@ object HeartRateManager {
             }
         }
 
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            // Notifications are on; now it's safe to issue the Device Information reads.
+            if (descriptor.uuid == CLIENT_CONFIG_UUID) readDeviceInfo(gatt)
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            if (status != BluetoothGatt.GATT_SUCCESS) return
+            val text = characteristic.getStringValue(0)?.trim()?.takeIf { it.isNotBlank() }
+            when (characteristic.uuid) {
+                MANUFACTURER_NAME_UUID -> {
+                    manufacturerName = text
+                    Timber.i("HR strap manufacturer=%s", text)
+                    // Chain the model read after the manufacturer read completes.
+                    val model = gatt.getService(DEVICE_INFO_SERVICE_UUID)
+                        ?.getCharacteristic(MODEL_NUMBER_UUID)
+                    if (model != null) gatt.readCharacteristic(model) else applyFriendlyName()
+                }
+
+                MODEL_NUMBER_UUID -> {
+                    modelNumber = text
+                    Timber.i("HR strap model=%s", text)
+                    applyFriendlyName()
+                }
+            }
+        }
+
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -495,6 +554,36 @@ object HeartRateManager {
             if (characteristic.uuid != HEART_RATE_MEASUREMENT_UUID) return
             parseHeartRate(characteristic.value)?.let { mutableBpm.value = it }
         }
+    }
+
+    /** Begin reading the Device Information Service (manufacturer first, then model). */
+    @SuppressLint("MissingPermission")
+    private fun readDeviceInfo(gatt: BluetoothGatt) {
+        val dis = gatt.getService(DEVICE_INFO_SERVICE_UUID) ?: return
+        val manufacturer = dis.getCharacteristic(MANUFACTURER_NAME_UUID)
+        val model = dis.getCharacteristic(MODEL_NUMBER_UUID)
+        try {
+            when {
+                manufacturer != null -> gatt.readCharacteristic(manufacturer)
+                model != null -> gatt.readCharacteristic(model)
+            }
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing permission to read HR device info")
+        }
+    }
+
+    /**
+     * Combine the manufacturer and model into a friendly label (e.g. "Wahoo TICKR") and persist it.
+     * Falls back gracefully: if neither is present, the advertised name is left untouched.
+     */
+    private fun applyFriendlyName() {
+        val friendly = listOfNotNull(manufacturerName, modelNumber)
+            .joinToString(" ")
+            .trim()
+        if (friendly.isBlank()) return
+        Timber.i("HR strap friendly name resolved: %s", friendly)
+        mutableDeviceName.value = friendly
+        prefs.edit { putString(KEY_LAST_NAME, friendly) }
     }
 
     private const val PREFS = "heartrate"
@@ -512,6 +601,12 @@ object HeartRateManager {
     val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
     val HEART_RATE_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
     val CLIENT_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    // Device Information Service — holds the human-readable manufacturer/model, which is friendlier
+    // than the advertised GAP name (often just a model+serial like "808S 0058679").
+    val DEVICE_INFO_SERVICE_UUID: UUID = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb")
+    val MANUFACTURER_NAME_UUID: UUID = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb")
+    val MODEL_NUMBER_UUID: UUID = UUID.fromString("00002a24-0000-1000-8000-00805f9b34fb")
 }
 
 /**

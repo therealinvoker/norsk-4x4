@@ -42,9 +42,13 @@ fun HeartRateSection(onRequestPermissions: () -> Unit) {
     val deviceName by HeartRateManager.deviceName.collectAsStateWithLifecycle()
     val discovered by HeartRateManager.discovered.collectAsStateWithLifecycle()
 
+    // We remember a strap once it has a saved name; the manager auto-reconnects to it in the
+    // background, so a remembered strap never needs a manual "connect" — only an optional "switch".
+    val hasRemembered = !deviceName.isNullOrBlank()
+
     Column(Modifier.fillMaxWidth()) {
         Text(
-            statusLine(connectionState, bpm),
+            statusLine(connectionState, bpm, hasRemembered),
             fontSize = 14.sp,
             color = Color.Gray,
         )
@@ -54,13 +58,6 @@ fun HeartRateSection(onRequestPermissions: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
         when (connectionState) {
-            HrConnectionState.Connected -> {
-                OutlinedButton(
-                    onClick = { HeartRateManager.forget() },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Forget device") }
-            }
-
             HrConnectionState.Scanning -> {
                 Column(Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -101,22 +98,51 @@ fun HeartRateSection(onRequestPermissions: () -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Text("Connecting…")
                 }
+                Spacer(Modifier.height(8.dp))
+                SwitchAndForgetRow(onRequestPermissions)
+            }
+
+            // Connected, or disconnected-but-remembered: the remembered strap is shown and being
+            // auto-reconnected, so just offer to switch to a different one or forget this one.
+            HrConnectionState.Connected -> {
+                SwitchAndForgetRow(onRequestPermissions)
             }
 
             HrConnectionState.Disconnected -> {
-                Button(
-                    onClick = onRequestPermissions,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9182B)),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Connect heart-rate strap", color = Color.White) }
+                if (hasRemembered) {
+                    SwitchAndForgetRow(onRequestPermissions)
+                } else {
+                    Button(
+                        onClick = onRequestPermissions,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9182B)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Connect heart-rate strap", color = Color.White) }
+                }
             }
         }
     }
 }
 
-private fun statusLine(state: HrConnectionState, bpm: Int?): String = when (state) {
+/** "Switch strap" (rescan/pick a different one) beside "Forget" for a remembered strap. */
+@Composable
+private fun SwitchAndForgetRow(onRequestPermissions: () -> Unit) {
+    Row(Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = onRequestPermissions,
+            modifier = Modifier.weight(1f),
+        ) { Text("Switch strap") }
+        Spacer(Modifier.width(12.dp))
+        OutlinedButton(
+            onClick = { HeartRateManager.forget() },
+            modifier = Modifier.weight(1f),
+        ) { Text("Forget") }
+    }
+}
+
+private fun statusLine(state: HrConnectionState, bpm: Int?, hasRemembered: Boolean): String = when (state) {
     HrConnectionState.Connected -> bpm?.let { "Connected · $it bpm" } ?: "Connected"
     HrConnectionState.Connecting -> "Connecting…"
     HrConnectionState.Scanning -> "Scanning…"
-    HrConnectionState.Disconnected -> "Not connected"
+    // A remembered strap is being auto-reconnected in the background; say so instead of "Not connected".
+    HrConnectionState.Disconnected -> if (hasRemembered) "Waiting for strap…" else "Not connected"
 }
