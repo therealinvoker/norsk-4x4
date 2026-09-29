@@ -6,11 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.IBinder
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -182,10 +181,10 @@ class OverlayService : LifecycleEnabledService() {
                     FourByFour.recordSample(power, cadence, resistance, hr)
                 }
         }
-        // Fire a vibration cue whenever the session crosses into a new phase.
+        // Beep whenever the session crosses into a new phase (the tablet has no vibrator).
         lifecycleScope.launch {
             FourByFour.transitions.collect { transition ->
-                if (FourByFour.cuesEnabled.value) vibrateForTransition(transition.to)
+                if (FourByFour.cuesEnabled.value) beepForTransition(transition.to)
             }
         }
 
@@ -298,23 +297,29 @@ class OverlayService : LifecycleEnabledService() {
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun vibrateForTransition(to: PhaseType) {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-        } else {
-            getSystemService(VIBRATOR_SERVICE) as Vibrator
+    /**
+     * Audible cue on phase change, played on the media stream (respects the bike's volume). A short
+     * urgent double/triple beep going into a hard interval, a single softer beep easing off, and a
+     * distinct pattern when the session finishes. The [ToneGenerator] is released after the tone so
+     * it doesn't hold the audio focus/native resource.
+     */
+    private fun beepForTransition(to: PhaseType) {
+        val (toneType, durationMs) = when (to) {
+            PhaseType.Work -> ToneGenerator.TONE_CDMA_ABBR_ALERT to 600
+            PhaseType.Recovery, PhaseType.CoolDown, PhaseType.WarmUp -> ToneGenerator.TONE_PROP_BEEP to 250
+            PhaseType.Finished -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD to 900
         }
-        val pattern = when (to) {
-            // Ramp of buzzes going into a hard interval, single buzz easing into recovery.
-            PhaseType.Work -> longArrayOf(0, 250, 120, 250, 120, 400)
-            PhaseType.Recovery, PhaseType.CoolDown, PhaseType.WarmUp -> longArrayOf(0, 300)
-            PhaseType.Finished -> longArrayOf(0, 200, 100, 200, 100, 600)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-        } else {
-            vibrator.vibrate(pattern, -1)
+        try {
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, ToneGenerator.MAX_VOLUME)
+            tone.startTone(toneType, durationMs)
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay((durationMs + 250).toLong())
+                tone.release()
+            }
+        } catch (e: RuntimeException) {
+            // ToneGenerator can throw if the audio path is momentarily unavailable; a missed beep is
+            // non-fatal (the vibration cue still fires).
+            Timber.e(e, "Failed to play phase-change beep")
         }
     }
 

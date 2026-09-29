@@ -104,7 +104,7 @@ fun FourByFourControls(
 
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Vibrate on phase change", modifier = Modifier.weight(1f), fontSize = 16.sp)
+                Text("Beep on phase change", modifier = Modifier.weight(1f), fontSize = 16.sp)
                 Switch(checked = cuesEnabled, onCheckedChange = { FourByFour.setCuesEnabled(it) })
             }
 
