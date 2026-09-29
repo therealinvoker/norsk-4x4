@@ -26,11 +26,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
+import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.history.ui.HistoryScreen
 import com.spop.poverlay.history.ui.SessionDetailScreen
 import com.spop.poverlay.hr.HeartRateManager
+import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -44,8 +47,19 @@ private enum class Screen { Home, History, Detail }
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: ConfigurationViewModel
 
+    companion object {
+        /** Intent extra set by the home-screen widget to start a 4x4 ride with the last settings. */
+        const val EXTRA_START_RIDE = "com.spop.poverlay.START_RIDE"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // One-tap start from the home-screen widget: start the overlay + a 4x4 ride with the last
+        // saved settings and close, without ever showing the config UI. Launching via this activity
+        // (rather than the widget starting the service directly) keeps the foreground-service start
+        // in a foreground context, which Android permits.
+        if (handleStartRideIntent(intent)) return
+
         viewModel =
             ConfigurationViewModel(
                 application, ConfigurationRepository(applicationContext, this),
@@ -99,6 +113,35 @@ class MainActivity : ComponentActivity() {
             // not only at cold process start, so it connects as soon as the strap powers on.
             HeartRateManager.autoReconnect()
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // If the app is already open when the widget is tapped, still honour the start request.
+        if (handleStartRideIntent(intent)) return
+    }
+
+    /**
+     * If [intent] is a widget "start ride" request, start the overlay + 4x4 session with the last
+     * settings and finish. Returns true when handled (caller should skip building the config UI).
+     * When the overlay permission is missing it returns false so the normal UI can prompt for it.
+     */
+    private fun handleStartRideIntent(intent: Intent?): Boolean {
+        if (intent?.getBooleanExtra(EXTRA_START_RIDE, false) != true) return false
+        val canOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        if (!canOverlay) {
+            Toast.makeText(
+                this,
+                "Allow \"display over other apps\" once, then use the widget to start.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return false
+        }
+        ContextCompat.startForegroundService(this, Intent(this, OverlayService::class.java))
+        FourByFour.start()
+        finish()
+        return true
     }
 
     private fun restartGrupetto() {

@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Norsk 4×4</string>
     <string name="overlay_notification">Norsk 4×4 overlay is running</string>
+    <string name="widget_start_label">Start 4×4</string>
 </resources>
