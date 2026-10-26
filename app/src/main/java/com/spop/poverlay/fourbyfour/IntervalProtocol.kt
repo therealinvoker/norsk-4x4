@@ -68,6 +68,12 @@ data class ProtocolConfig(
     /** High edge of the 4x4 work-interval target band (95% HRmax); null when age is unset. */
     val workHrHigh: Int? get() = estimatedHrMax?.let { (0.95 * it).roundToInt() }
 
+    /** Low edge of the active-recovery target band (60% HRmax); null when age is unset. */
+    val recoveryHrLow: Int? get() = estimatedHrMax?.let { (0.60 * it).roundToInt() }
+
+    /** High edge of the active-recovery target band (70% HRmax); null when age is unset. */
+    val recoveryHrHigh: Int? get() = estimatedHrMax?.let { (0.70 * it).roundToInt() }
+
     /** Ordered, non-overlapping segments that make up the full session. */
     val timeline: List<PhaseSegment> get() = buildTimeline()
 

@@ -48,6 +48,7 @@ private val RecoveryColor = Color(0xFF1E88E5)
 private val CoolDownColor = Color(0xFF26A69A)
 private val FinishedColor = Color(0xFFFFC107)
 private val PauseColor = Color(0xFF455A64)
+private val EditColor = Color(0xFF5E35B1)
 
 private fun PhaseType.accent() = when (this) {
     PhaseType.WarmUp -> WarmUpColor
@@ -82,6 +83,7 @@ fun FourByFourBanner(
     onLongPress: () -> Unit,
     onPlayPause: () -> Unit,
     onReset: () -> Unit,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val accent = state.phase.accent()
@@ -136,16 +138,20 @@ fun FourByFourBanner(
 
             // These have their own clickable regions so taps hit the buttons, not the banner-level
             // tap handler. While paused we surface Resume + Reset; while running, just Pause.
-            PauseControls(state = state, onPlayPause = onPlayPause, onReset = onReset)
+            PauseControls(state = state, onPlayPause = onPlayPause, onReset = onReset, onEdit = onEdit)
         }
 
         Spacer(Modifier.height(6.dp))
-        // During a work interval, pace against the best-ever interval average (the dashed line).
-        // Otherwise fall back to the cumulative kJ-vs-best chip.
+        val hrMax = config.estimatedHrMax
+        val low = config.workHrLow
+        val high = config.workHrHigh
+        val recLow = config.recoveryHrLow
+        val recHigh = config.recoveryHrHigh
+        // During a work interval, pace against the best-ever interval average (the dashed line) and
+        // show the HR zone beside it. During warm-up, show the HR zone climbing toward the work
+        // band; during recovery, show the HR zone settling into the 60–70% recovery band. Otherwise
+        // fall back to the cumulative kJ-vs-best chip.
         if (state.phase.isHard && state.active) {
-            val hrMax = config.estimatedHrMax
-            val low = config.workHrLow
-            val high = config.workHrHigh
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IntervalPaceRow(
                     bestAvg = bestIntervalAvgWatts,
@@ -157,6 +163,16 @@ fun FourByFourBanner(
                     HrZoneRow(hrTrace = hrTrace, currentHr = currentHr, hrMax = hrMax, low = low, high = high)
                 }
             }
+            Spacer(Modifier.height(4.dp))
+        } else if (state.phase == PhaseType.WarmUp && state.active &&
+            hrMax != null && low != null && high != null && currentHr != null
+        ) {
+            HrZoneRow(hrTrace = hrTrace, currentHr = currentHr, hrMax = hrMax, low = low, high = high)
+            Spacer(Modifier.height(4.dp))
+        } else if (state.phase == PhaseType.Recovery && state.active &&
+            hrMax != null && recLow != null && recHigh != null && currentHr != null
+        ) {
+            HrZoneRow(hrTrace = hrTrace, currentHr = currentHr, hrMax = hrMax, low = recLow, high = recHigh)
             Spacer(Modifier.height(4.dp))
         } else if (vsBestKj != null && (state.active || state.finished)) {
             VsBestChip(vsBestKj)
@@ -190,11 +206,14 @@ private fun PauseControls(
     state: FourByFourState,
     onPlayPause: () -> Unit,
     onReset: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     if (!state.active) return
     if (state.paused) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BannerButton(label = "▶ RESUME", background = EffortGood, onClick = onPlayPause)
+            Spacer(Modifier.width(8.dp))
+            BannerButton(label = "⚙ EDIT", background = EditColor, onClick = onEdit)
             Spacer(Modifier.width(8.dp))
             BannerButton(label = "↻ RESET", background = WorkColor, onClick = onReset)
         }
@@ -388,13 +407,15 @@ private fun HrZoneRow(hrTrace: List<Int>, currentHr: Int?, hrMax: Int, low: Int,
             modifier = Modifier.width(170.dp).height(42.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.width(58.dp)) {
+        Column(modifier = Modifier.width(72.dp)) {
             Text("target", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
             Text(
                 text = "$low–$high",
                 color = HrZoneEdgeColor,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

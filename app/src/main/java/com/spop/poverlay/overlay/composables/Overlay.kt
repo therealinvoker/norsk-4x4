@@ -15,9 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -25,6 +27,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import com.spop.poverlay.MainActivity
 import com.spop.poverlay.fourbyfour.FourByFour
 import com.spop.poverlay.hr.HeartRateManager
 import com.spop.poverlay.overlay.composables.FourByFourBanner
@@ -56,6 +60,7 @@ fun Overlay(
     onLayout: (IntSize) -> Unit,
     onTimerLayout: (IntSize) -> Unit
 ) {
+    val context = LocalContext.current
     val power by sensorViewModel.powerValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
 
     val powerGraph = remember { sensorViewModel.powerGraph }
@@ -236,6 +241,18 @@ fun Overlay(
                         onLongPress = { FourByFour.stop() },
                         onPlayPause = { FourByFour.togglePause() },
                         onReset = { FourByFour.start() },
+                        onEdit = {
+                            // Bring up the config screen over the overlay so the rider can tweak the
+                            // current settings while paused. The session stays paused underneath.
+                            context.startActivity(
+                                Intent(context, MainActivity::class.java).apply {
+                                    addFlags(
+                                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                            Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                                    )
+                                },
+                            )
+                        },
                         modifier = Modifier
                             .padding(horizontal = 6.dp)
                             .padding(bottom = 8.dp),
@@ -245,8 +262,10 @@ fun Overlay(
                     OverlayLocation.Top -> {
                         statsRow()
                         if (showBanner) bannerRow()
+                        OverlayGrabHandle(location)
                     }
                     OverlayLocation.Bottom -> {
+                        OverlayGrabHandle(location)
                         if (showBanner) bannerRow()
                         statsRow()
                     }
@@ -296,4 +315,29 @@ fun Overlay(
         }
     }
 
+}
+
+/**
+ * A small "grabber" bar on the outer edge of the expanded panel, signalling that the overlay can be
+ * dragged/minimized. Sits at the bottom for a top-anchored overlay and the top for a bottom-anchored
+ * one. Purely a visual affordance — the panel itself already handles the tap/drag to minimize.
+ */
+@Composable
+private fun OverlayGrabHandle(location: OverlayLocation) {
+    val padTop = if (location == OverlayLocation.Top) 1.dp else 5.dp
+    val padBottom = if (location == OverlayLocation.Top) 5.dp else 1.dp
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = padTop, bottom = padBottom),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(40.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White.copy(alpha = 0.35f)),
+        )
+    }
 }

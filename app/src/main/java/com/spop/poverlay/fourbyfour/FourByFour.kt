@@ -72,6 +72,7 @@ object FourByFour {
     private var liveJoules = 0.0
     private var bestCumulativeKj: FloatArray? = null
     private var currentIntervalIndex = -1
+    private var hrTraceSegment: String? = null
     private val intervalPowers = ArrayList<Float>()
     private val intervalHrs = ArrayList<Int>()
 
@@ -134,6 +135,7 @@ object FourByFour {
 
     private fun resetIntervalTracking() {
         currentIntervalIndex = -1
+        hrTraceSegment = null
         intervalPowers.clear()
         intervalHrs.clear()
         mutableCurrentIntervalTrace.value = emptyList()
@@ -175,22 +177,45 @@ object FourByFour {
 
     /** Track the current work interval's power/HR traces and running average for the pacing line. */
     private fun updateIntervalPace(state: FourByFourState, power: Float, hr: Int?) {
-        if (state.phase == PhaseType.Work) {
-            if (state.intervalIndex != currentIntervalIndex) {
-                currentIntervalIndex = state.intervalIndex
-                intervalPowers.clear()
-                intervalHrs.clear()
-                mutableCurrentIntervalHrTrace.value = emptyList()
+        when (state.phase) {
+            PhaseType.Work -> {
+                if (state.intervalIndex != currentIntervalIndex) {
+                    currentIntervalIndex = state.intervalIndex
+                    intervalPowers.clear()
+                    intervalHrs.clear()
+                    mutableCurrentIntervalHrTrace.value = emptyList()
+                }
+                hrTraceSegment = "Work-${state.intervalIndex}"
+                intervalPowers.add(power)
+                mutableCurrentIntervalTrace.value = intervalPowers.toList()
+                mutableCurrentIntervalAvgWatts.value = intervalPowers.average().toFloat()
+                accumulateHr(hr)
             }
-            intervalPowers.add(power)
-            mutableCurrentIntervalTrace.value = intervalPowers.toList()
-            mutableCurrentIntervalAvgWatts.value = intervalPowers.average().toFloat()
-            if (hr != null && hr > 0) {
-                intervalHrs.add(hr)
-                mutableCurrentIntervalHrTrace.value = intervalHrs.toList()
+            // Warm-up and active recovery have no power pacing line, but we still build a fresh HR
+            // trace per segment so the banner can show heart rate against its target band: climbing
+            // toward the work zone during warm-up, and settling into the 60–70% recovery zone
+            // between intervals. Each new segment starts the trace over.
+            PhaseType.WarmUp, PhaseType.Recovery -> {
+                val segment = "${state.phase}-${state.intervalIndex}"
+                if (segment != hrTraceSegment) {
+                    hrTraceSegment = segment
+                    currentIntervalIndex = -1
+                    intervalPowers.clear()
+                    intervalHrs.clear()
+                    mutableCurrentIntervalTrace.value = emptyList()
+                    mutableCurrentIntervalAvgWatts.value = null
+                    mutableCurrentIntervalHrTrace.value = emptyList()
+                }
+                accumulateHr(hr)
             }
-        } else if (currentIntervalIndex != -1) {
-            resetIntervalTracking()
+            else -> if (currentIntervalIndex != -1 || hrTraceSegment != null) resetIntervalTracking()
+        }
+    }
+
+    private fun accumulateHr(hr: Int?) {
+        if (hr != null && hr > 0) {
+            intervalHrs.add(hr)
+            mutableCurrentIntervalHrTrace.value = intervalHrs.toList()
         }
     }
 

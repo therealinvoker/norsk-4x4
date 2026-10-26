@@ -61,6 +61,24 @@ fun OverlayMinimizedContent(
     }
     val size = remember { mutableStateOf(IntSize.Zero) }
 
+    // The stopwatch shows "‒ ‒:‒ ‒" before it's started and "00:00" at zero; in both cases it has
+    // no meaningful value, so we hide it (per request) instead of showing an idle timer.
+    val timerHasValue = timerLabel != "00:00" && timerLabel.any(Char::isDigit)
+
+    // When expanded, this content IS the standalone timer pill. With no running timer there's
+    // nothing to show, so render a zero-size node (and report it) rather than an empty box.
+    if (!isMinimized && !timerHasValue) {
+        Spacer(
+            modifier = Modifier.onSizeChanged {
+                if (it != size.value) {
+                    size.value = it
+                    onLayout(it)
+                }
+            }
+        )
+        return
+    }
+
     Row(
         modifier = Modifier
             .alpha(contentAlpha)
@@ -92,7 +110,7 @@ fun OverlayMinimizedContent(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val infiniteTransition = rememberInfiniteTransition()
-        if (!isMinimized || showTimerWhenMinimized || timerPaused) {
+        if (timerHasValue && (!isMinimized || showTimerWhenMinimized || timerPaused)) {
 
             val timerAlpha = if (timerPaused) {
                 infiniteTransition.animateFloat(
