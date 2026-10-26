@@ -4,6 +4,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntOffsetAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -15,8 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -318,26 +320,35 @@ fun Overlay(
 }
 
 /**
- * A small "grabber" bar on the outer edge of the expanded panel, signalling that the overlay can be
- * dragged/minimized. Sits at the bottom for a top-anchored overlay and the top for a bottom-anchored
- * one. Purely a visual affordance — the panel itself already handles the tap/drag to minimize.
+ * A small chevron on the outer edge of the expanded panel, signalling that tapping the overlay
+ * collapses it. It points in the collapse direction — up for a top-anchored overlay, down for a
+ * bottom-anchored one. Purely a visual affordance; the panel itself handles the tap to minimize.
  */
 @Composable
 private fun OverlayGrabHandle(location: OverlayLocation) {
-    val padTop = if (location == OverlayLocation.Top) 1.dp else 5.dp
-    val padBottom = if (location == OverlayLocation.Top) 5.dp else 1.dp
+    val pointUp = location == OverlayLocation.Top
+    val padTop = if (pointUp) 1.dp else 4.dp
+    val padBottom = if (pointUp) 4.dp else 1.dp
+    val color = Color.White.copy(alpha = 0.5f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = padTop, bottom = padBottom),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .width(40.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White.copy(alpha = 0.35f)),
-        )
+        Canvas(modifier = Modifier.size(width = 28.dp, height = 8.dp)) {
+            val stroke = 2.dp.toPx()
+            val inset = stroke
+            val midX = size.width / 2f
+            if (pointUp) {
+                // ^  — tap to collapse upward
+                drawLine(color, Offset(inset, size.height - inset), Offset(midX, inset), stroke, StrokeCap.Round)
+                drawLine(color, Offset(midX, inset), Offset(size.width - inset, size.height - inset), stroke, StrokeCap.Round)
+            } else {
+                // v  — tap to collapse downward
+                drawLine(color, Offset(inset, inset), Offset(midX, size.height - inset), stroke, StrokeCap.Round)
+                drawLine(color, Offset(midX, size.height - inset), Offset(size.width - inset, inset), stroke, StrokeCap.Round)
+            }
+        }
     }
 }
